@@ -19,7 +19,13 @@ export type ItemId =
   | "sash"
   | "tide"
   | "wood"
-  | "herb";
+  | "herb"
+  | "driftwood"
+  | "kelp"
+  | "shell"
+  | "harpoon"
+  | "stormcloak"
+  | "shellmail";
 
 export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn";
 export type Slot = "wep" | "arm" | "cloak";
@@ -45,6 +51,12 @@ export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> =
   tide: { name: "Приливный камень", desc: "Вторая клятва. Кормит паруса, не голодных." },
   wood: { name: "Дерево", desc: "С лесной кромки. На факел и пилу." },
   herb: { name: "Трава", desc: "С топи. На зелье и паёк." },
+  driftwood: { name: "Плавник", desc: "Дерево, выбеленное солью. Гнётся, но не ломается." },
+  kelp: { name: "Ламинария", desc: "Прочная лента из полосы отлива." },
+  shell: { name: "Панцирь", desc: "Слоистая раковина островного краба." },
+  harpoon: { name: "Гарпун киля", desc: "Длинное древко и тяжёлое соляное жало.", slot: "wep" },
+  stormcloak: { name: "Штормовой плащ", desc: "Тёмно-зелёный плащ, пропитанный маслом ламинарии.", slot: "cloak" },
+  shellmail: { name: "Панцирная броня", desc: "Пластины раковин поверх кожи. Светится у воды.", slot: "arm" },
 };
 
 export type Npc = {
@@ -255,7 +267,7 @@ export const GREET: Record<NpcId, Record<Guise, string>> = {
   },
 };
 
-export type MobKind = "orc" | "skel" | "wolf" | "wraith";
+export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab";
 
 export const MOB: Record<
   MobKind,
@@ -265,6 +277,7 @@ export const MOB: Record<
   orc: { name: "Орк", hp: 16, atk: 4, xp: 14, gold: 10, sprite: 0 },
   skel: { name: "Скелет", hp: 18, atk: 5, xp: 16, gold: 8, sprite: 1 },
   wraith: { name: "Призрак", hp: 28, atk: 7, xp: 40, gold: 30, sprite: 3 },
+  crab: { name: "Панцирник", hp: 14, atk: 4, xp: 12, gold: 6, sprite: 0 },
 };
 
 export const SHOP: { word: string; npc: NpcId; item: ItemId; gold: number }[] = [
@@ -308,23 +321,12 @@ export const ASK: Record<string, string> = {
   CLOTH: "Купить полотно (12 зол.)",
 };
 
-export const CRAFT: { out: ItemId; gold: number; need: ItemId[] }[] = [
-  { out: "steel", gold: 12, need: ["ore"] },
-  { out: "chain", gold: 22, need: ["ore", "ore"] },
-  { out: "leather", gold: 6, need: ["hide"] },
-  { out: "torch", gold: 3, need: ["wood"] },
-  { out: "potion", gold: 8, need: ["herb"] },
-  { out: "food", gold: 4, need: ["herb", "hide"] },
-  { out: "shroud", gold: 8, need: ["hide", "cloth"] },
-  { out: "robe", gold: 18, need: ["cloth", "cloth"] },
-  { out: "sash", gold: 20, need: ["cloth", "cloth"] },
-];
-
 export const DROP: Record<MobKind, ItemId | null> = {
   wolf: "hide",
   orc: "ore",
   skel: "cloth",
   wraith: null,
+  crab: "shell",
 };
 
 export const KEY_RU: Record<string, string> = {

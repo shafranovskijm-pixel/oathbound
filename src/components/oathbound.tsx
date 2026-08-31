@@ -42,6 +42,7 @@ const IDLE: Snapshot = {
   wep: "Ржавый меч",
   arm: "Кожа",
   cloak: "без плаща",
+  equipment: { wep: "sword", arm: "leather", cloak: null },
   guise: "oath",
   goldFlash: 0,
   activeSlot: 0,
@@ -250,6 +251,7 @@ function WorldAtlas({
       ctx.fillText(m.name, ox + m.c * scale, oy + m.r * scale - 4);
     }
     for (const s of snap.sites) {
+      if (s.map !== "over") continue;
       ctx.fillStyle = s.built ? "#d8c070" : "rgba(232,228,216,0.55)";
       ctx.fillRect(ox + s.c * scale - 3, oy + s.r * scale - 3, 6, 6);
     }
@@ -400,7 +402,7 @@ export function Oathbound() {
             <Slot label="" name={snap.inKeep ? "Двор" : snap.keepClaimed ? "Во Двор" : "Найди Двор"} icon={<HudIco id="keep" />} ready={0} max={1} disabled={!snap.keepClaimed} onClick={() => g.current?.goCastle()} />
             <Slot label="M" name="Карта мира" icon={<HudIco id="way" />} ready={0} max={1} onClick={() => g.current?.toggleAtlas()} />
             {snap.inKeep || snap.nearSite ? (
-              <Button variant="ghost" size="sm" onClick={() => g.current?.toggleBuild()}>Строить</Button>
+              <Button variant="ghost" size="sm" onClick={() => g.current?.toggleBuild()}>Строить / ремесло</Button>
             ) : null}
             {snap.canRest ? (
               <Button variant="ghost" size="sm" onClick={() => g.current?.rest()}>Отдых</Button>

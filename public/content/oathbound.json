@@ -12,6 +12,7 @@
   "sites": [
     {
       "id": "grove",
+      "map": "over",
       "name": "Западная роща",
       "blurb": "Пень и камни. Здесь стоял охотничий двор.",
       "c": 10,
@@ -24,6 +25,7 @@
     },
     {
       "id": "mill",
+      "map": "over",
       "name": "Южная межа",
       "blurb": "Ровный камень. Мельница, амбар или пила.",
       "c": 22,
@@ -36,6 +38,7 @@
     },
     {
       "id": "ridge",
+      "map": "over",
       "name": "Восточный кряж",
       "blurb": "Ветер режет. Сюда ставят дозор.",
       "c": 64,
@@ -48,6 +51,7 @@
     },
     {
       "id": "marsh",
+      "map": "over",
       "name": "Топь у костров",
       "blurb": "Оскар ворчит, что тут можно жить.",
       "c": 52,
@@ -60,6 +64,7 @@
     },
     {
       "id": "cape",
+      "map": "over",
       "name": "Северный мыс",
       "blurb": "Соль и чайки. Место под маяк или часовню.",
       "c": 42,
@@ -69,7 +74,32 @@
         { "id": "nets", "name": "Сетник", "cost": 22, "desc": "Сети сушатся. Рыба в котле.", "bonus": "+еда", "sprite": "shack", "frame": 0, "food": 18 },
         { "id": "chapel", "name": "Часовня мыса", "cost": 26, "desc": "Тихо. Силы возвращаются.", "bonus": "+6 HP · отдых", "sprite": "keep", "frame": 0, "hp": 6, "rest": true }
       ]
+    },
+    {
+      "id": "haven",
+      "map": "isle",
+      "name": "Бухта Соляного киля",
+      "blurb": "Чёрный базальт держит ветер. Здесь можно основать первый дом архипелага.",
+      "c": 13,
+      "r": 17,
+      "options": [
+        { "id": "turfhouse", "name": "Дерновый дом", "cost": 28, "desc": "Камень, дерево и толстая зелёная крыша.", "bonus": "Отдых · +еда", "sprite": "shack", "frame": 0, "rest": true, "food": 16 },
+        { "id": "saltworks", "name": "Соляная мастерская", "cost": 32, "desc": "Верстак для гарпунов, плащей и панцирей.", "bonus": "Островной крафт · +полотно", "sprite": "keep", "frame": 1, "craft": true, "cloth": 2 },
+        { "id": "stormfire", "name": "Штормовой огонь", "cost": 36, "desc": "Сигнальная башня над туманом.", "bonus": "Камень пути · +золото", "sprite": "beacon", "frame": 0, "gold": 20, "waypoint": "isle" }
+      ]
     }
+  ],
+  "gatherNodes": [
+    { "id": "isle-wreck-1", "map": "isle", "c": 7, "r": 18, "label": "Обломки шхуны", "item": "driftwood", "amount": 2, "sprite": 0 },
+    { "id": "isle-wreck-2", "map": "isle", "c": 21, "r": 20, "label": "Выброшенный брус", "item": "driftwood", "amount": 2, "sprite": 0 },
+    { "id": "isle-kelp-1", "map": "isle", "c": 9, "r": 20, "label": "Приливные водоросли", "item": "kelp", "amount": 2, "sprite": 4 },
+    { "id": "isle-kelp-2", "map": "isle", "c": 23, "r": 17, "label": "Лента ламинарии", "item": "kelp", "amount": 2, "sprite": 4 },
+    { "id": "isle-kelp-3", "map": "isle", "c": 28, "r": 12, "label": "Водоросли отлива", "item": "kelp", "amount": 2, "sprite": 4 },
+    { "id": "isle-basalt-1", "map": "isle", "c": 17, "r": 10, "label": "Базальтовая жила", "item": "ore", "amount": 2, "sprite": 3 },
+    { "id": "isle-basalt-2", "map": "isle", "c": 25, "r": 7, "label": "Чёрный утёс", "item": "ore", "amount": 2, "sprite": 3 },
+    { "id": "isle-shell-1", "map": "isle", "c": 12, "r": 20, "label": "Раковины в отливе", "item": "shell", "amount": 2, "sprite": 8 },
+    { "id": "isle-shell-2", "map": "isle", "c": 29, "r": 16, "label": "Панцирный берег", "item": "shell", "amount": 2, "sprite": 8 },
+    { "id": "isle-shell-3", "map": "isle", "c": 6, "r": 13, "label": "Гнездо крабов", "item": "shell", "amount": 2, "sprite": 8 }
   ],
   "craft": [
     { "out": "steel", "gold": 12, "need": ["ore"] },
@@ -80,6 +110,9 @@
     { "out": "food", "gold": 4, "need": ["herb", "hide"] },
     { "out": "shroud", "gold": 8, "need": ["hide", "cloth"] },
     { "out": "robe", "gold": 18, "need": ["cloth", "cloth"] },
-    { "out": "sash", "gold": 20, "need": ["cloth", "cloth"] }
+    { "out": "sash", "gold": 20, "need": ["cloth", "cloth"] },
+    { "out": "harpoon", "gold": 14, "need": ["driftwood", "ore", "cloth"] },
+    { "out": "stormcloak", "gold": 16, "need": ["kelp", "kelp", "cloth"] },
+    { "out": "shellmail", "gold": 20, "need": ["shell", "shell", "hide"] }
   ]
 }

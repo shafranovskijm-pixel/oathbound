@@ -1,7 +1,7 @@
 import type { MapId } from "./world";
 
 export type BuildId = "hearth" | "forge" | "vault" | "tower" | "barracks" | "gate";
-export type WpId = "keep" | "westmere" | "shrine" | "hold" | "forgecamp" | "ridge" | "cape" | "mill";
+export type WpId = "keep" | "westmere" | "shrine" | "hold" | "forgecamp" | "ridge" | "cape" | "mill" | "isle";
 
 export type Building = {
   id: BuildId;
@@ -32,4 +32,5 @@ export const WAYPOINTS: { id: WpId; name: string; map: MapId; c: number; r: numb
   { id: "ridge", name: "Восточный кряж", map: "over", c: 64, r: 20 },
   { id: "cape", name: "Северный мыс", map: "over", c: 42, r: 8 },
   { id: "mill", name: "Южная межа", map: "over", c: 22, r: 38 },
+  { id: "isle", name: "Бухта Соляного киля", map: "isle", c: 13, r: 17 },
 ];
