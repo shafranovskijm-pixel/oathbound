@@ -10,6 +10,7 @@ import {
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { LANDMARKS, SITES, siteAt, type SiteId } from "./data";
+import { readGameSave, writeGameSave, type GameSave, type SavedMode } from "./save";
 import {
   EXITS,
   MAP_SIZE,
@@ -25,7 +26,7 @@ import {
   type MapId,
 } from "./world";
 
-export type Mode = "menu" | "play" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
+export type Mode = "menu" | "play" | "pause" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
 
 export type Snapshot = {
   mode: Mode;
@@ -50,7 +51,7 @@ export type Snapshot = {
   place: string;
   xpNeed: number;
   meleeCd: number;
-  buildings: { id: BuildId; name: string; cost: number; desc: string; bonus: string; built: boolean }[];
+  buildings: { id: BuildId; name: string; cost: number; desc: string; bonus: string; built: boolean; ok: boolean }[];
   waypoints: { id: WpId; name: string; unlocked: boolean }[];
   portalOpen: boolean;
   inKeep: boolean;
@@ -76,10 +77,14 @@ export type Snapshot = {
   }[];
   nearSite: SiteId | null;
   landmarks: { id: string; name: string; c: number; r: number }[];
+  canContinue: boolean;
 };
 
 export type GameHandle = {
   start: (id: HeroId) => void;
+  continueGame: () => boolean;
+  pause: () => void;
+  returnToMenu: () => void;
   keyword: (k: string) => void;
   attack: () => void;
   cast: (slot: number) => void;
@@ -247,7 +252,6 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   const built = new Set<BuildId>();
   const raised = new Map<SiteId, string>();
   let siteArmor = 0;
-  let siteCraft = false;
   const stones = new Set<WpId>();
   let fieldPortal: { map: MapId; x: number; y: number } | null = null;
   let portalLock = 0;
@@ -279,6 +283,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   const cam = { x: px, y: py };
   let mobId = 1;
   let mobs: Mob[] = [];
+  let saveAvailable = readGameSave() !== null;
+  let lastSavedAt = 0;
 
   const mods = {
     armor: 0,
@@ -411,9 +417,20 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return true;
   }
 
+  function currentSiteOption() {
+    if (map !== "over") return null;
+    const site = siteAt(tileC(), tileR());
+    if (!site) return null;
+    return site.options.find((option) => option.id === raised.get(site.id)) ?? null;
+  }
+
+  function canCraftHere() {
+    return (map === "keep" && built.has("forge")) || !!currentSiteOption()?.craft;
+  }
+
   function craft(out: ItemId) {
     const r = CRAFT.find((x) => x.out === out);
-    if (!r || (!siteCraft && (map !== "keep" || !built.has("forge")))) {
+    if (!r || !canCraftHere()) {
       say("Нужна кузница во дворе или изба травника на участке.");
       emit(true);
       return;
@@ -502,7 +519,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       place: PLACE[map],
       xpNeed: level * 36,
       meleeCd,
-      buildings: BUILDINGS.map((b) => ({ id: b.id, name: b.name, cost: b.cost, desc: b.desc, bonus: b.bonus, built: built.has(b.id) })),
+      buildings: BUILDINGS.map((b) => ({
+        id: b.id,
+        name: b.name,
+        cost: b.cost,
+        desc: b.desc,
+        bonus: b.bonus,
+        built: built.has(b.id),
+        ok: gold >= b.cost,
+      })),
       waypoints: WAYPOINTS.map((w) => ({ id: w.id, name: w.name, unlocked: stones.has(w.id) })),
       portalOpen: !!fieldPortal,
       inKeep: map === "keep",
@@ -519,7 +544,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       guise: guise(),
       goldFlash,
       activeSlot,
-      canCraft: (map === "keep" && built.has("forge")) || siteCraft,
+      canCraft: canCraftHere(),
       recipes: CRAFT.map((r) => ({
         out: r.out,
         name: ITEM[r.out].name,
@@ -548,14 +573,160 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           })),
         };
       }),
-      nearSite: siteAt(tileC(), tileR())?.id ?? null,
+      nearSite: map === "over" ? (siteAt(tileC(), tileR())?.id ?? null) : null,
       landmarks: LANDMARKS.map((l) => ({ ...l, c: l.id === "dock" ? DOCK.c : l.c, r: l.id === "dock" ? DOCK.r : l.r })),
+      canContinue: saveAvailable,
     };
+  }
+
+  function savedMode(): SavedMode {
+    if (mode === "talent" || mode === "dead" || mode === "win") return mode;
+    return "play";
+  }
+
+  function persistGame(force = false) {
+    if (mode === "menu") return;
+    const now = Date.now();
+    if (!force && now - lastSavedAt < 5000) return;
+    const save: GameSave = {
+      version: 1,
+      updatedAt: now,
+      mode: savedMode(),
+      heroId,
+      map,
+      px,
+      py,
+      dir,
+      hp,
+      maxHp,
+      mp,
+      maxMp,
+      food,
+      gold,
+      xp,
+      level,
+      str,
+      baseSpd,
+      baseArmor,
+      items: [...items],
+      worn: { ...worn },
+      lyra,
+      lyraHp,
+      flags: [...flags],
+      opened: [...opened],
+      owned: [...owned],
+      pending: [...pending],
+      built: [...built],
+      raised: [...raised],
+      stones: [...stones],
+      fieldPortal: fieldPortal ? { ...fieldPortal } : null,
+      vaultVisit,
+      log: [...log],
+      activeSlot,
+      mobs: mobs.map((mob) => ({ ...mob })),
+      cds: { ...cds },
+    };
+    if (writeGameSave(save)) {
+      saveAvailable = true;
+      lastSavedAt = now;
+    }
+  }
+
+  function restoreGame() {
+    const save = readGameSave();
+    if (!save) {
+      saveAvailable = false;
+      return false;
+    }
+    reset(save.heroId);
+    map = save.map;
+    px = save.px;
+    py = save.py;
+    dir = Math.max(0, Math.min(3, Math.floor(save.dir)));
+    hp = save.hp;
+    maxHp = save.maxHp;
+    mp = save.mp;
+    maxMp = save.maxMp;
+    food = save.food;
+    gold = save.gold;
+    xp = save.xp;
+    level = Math.max(1, Math.floor(save.level));
+    str = save.str;
+    baseSpd = save.baseSpd;
+    baseArmor = save.baseArmor;
+
+    items.length = 0;
+    items.push(...save.items.filter((id) => id in ITEM));
+    for (const slot of Object.keys(worn) as Slot[]) {
+      const id = save.worn[slot];
+      worn[slot] = id && id in ITEM && ITEM[id].slot === slot && items.includes(id) ? id : null;
+    }
+    lyra = save.lyra;
+    lyraHp = save.lyraHp;
+    flags.clear();
+    save.flags.forEach((flag) => flags.add(flag));
+    opened.clear();
+    save.opened.forEach((id) => opened.add(id));
+    owned.clear();
+    save.owned.filter((id) => id in TALENTS).forEach((id) => owned.add(id));
+    pending = save.pending.filter((id) => id in TALENTS && !owned.has(id));
+    built.clear();
+    save.built.filter((id) => BUILDINGS.some((building) => building.id === id)).forEach((id) => built.add(id));
+    raised.clear();
+    for (const [siteId, optionId] of save.raised) {
+      const site = SITES.find((candidate) => candidate.id === siteId);
+      if (site?.options.some((option) => option.id === optionId)) raised.set(siteId, optionId);
+    }
+    stones.clear();
+    save.stones.filter((id) => WAYPOINTS.some((waypoint) => waypoint.id === id)).forEach((id) => stones.add(id));
+    fieldPortal = save.fieldPortal ? { ...save.fieldPortal } : null;
+    vaultVisit = save.vaultVisit;
+    log.length = 0;
+    log.push(...save.log.slice(-10));
+    activeSlot = Math.max(-1, Math.min(2, Math.floor(save.activeSlot)));
+
+    resetMods();
+    owned.forEach((id) => applyTalent(id, false));
+    siteArmor = 0;
+    for (const [siteId, optionId] of raised) {
+      const option = SITES.find((site) => site.id === siteId)?.options.find((candidate) => candidate.id === optionId);
+      siteArmor += option?.armor ?? 0;
+    }
+    recalcKeep();
+    for (const key of Object.keys(cds)) delete cds[key];
+    Object.assign(cds, save.cds);
+    mobs = save.mobs.map((mob) => ({ ...mob }));
+    mobId = Math.max(1, ...mobs.map((mob) => mob.id + 1));
+
+    if (!tryPos(px, py)) {
+      px = SPAWN[map].c * TILE + 16;
+      py = SPAWN[map].r * TILE + 16;
+    }
+    cam.x = px;
+    cam.y = py;
+    sparks.length = 0;
+    floaters.length = 0;
+    shots.length = 0;
+    slashes.length = 0;
+    coins.length = 0;
+    moveTo = null;
+    huntId = 0;
+    talkGo = null;
+    talkNpc = null;
+    lastAsk = "";
+    holdLmb = false;
+    holdRmb = false;
+    mode = save.mode === "talent" && pending.length === 0 ? "play" : save.mode;
+    saveAvailable = true;
+    lastSavedAt = Date.now();
+    say("Игра загружена.");
+    return true;
   }
 
   function emit(force = false) {
     if (!force && time - lastEmit < 0.08) return;
     lastEmit = time;
+    persistGame(force);
     onChange(snapshot());
   }
 
@@ -590,7 +761,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     mods.stun = 0;
   }
 
-  function applyTalent(id: TalentId) {
+  function applyTalent(id: TalentId, grantStats = true) {
     if (id === "iron") mods.armor += 3;
     if (id === "blood") mods.lifesteal = 2;
     if (id === "wide") mods.slash += 0.4;
@@ -598,12 +769,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       mods.holy += 7;
       mods.stun += 0.5;
     }
-    if (id === "stamina") {
+    if (id === "stamina" && grantStats) {
       maxHp += 14;
       hp += 14;
     }
     if (id === "whirl") mods.whirl = 1;
-    if (id === "mind") {
+    if (id === "mind" && grantStats) {
       maxMp += 10;
       mp += 10;
     }
@@ -655,7 +826,6 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     built.clear();
     raised.clear();
     siteArmor = 0;
-    siteCraft = false;
     stones.clear();
     fieldPortal = null;
     keepDmg = 0;
@@ -665,7 +835,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     lastAsk = "";
     mode = "play";
     log.length = 0;
-    log.push(`${h.name} на дороге. Юг — руина двора. T — портал. E — говорить.`);
+    log.push(`${h.name} на дороге. Юг — руина Двора. E — говорить и исследовать.`);
     cam.x = px;
     cam.y = py;
     sparks.length = 0;
@@ -1142,8 +1312,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       startTalk(n);
       return;
     }
-    const plot = siteAt(tileC(), tileR());
-    if (plot && map === "over") {
+    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
+    if (plot) {
       const pick = raised.get(plot.id);
       if (!pick) {
         mode = "site";
@@ -1226,7 +1396,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     emit(true);
   }
 
-  function usePotion() {
+  function drinkPotion() {
     if (!has("potion")) {
       say("Нет зелья.");
       emit(true);
@@ -1275,8 +1445,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
-    if (!flags.has("keep") && map !== "over") {
-      say("Сначала найди руину к югу от дороги.");
+    if (!flags.has("keep")) {
+      say("Сначала войди в руину Двора к югу от дороги.");
       emit(true);
       return;
     }
@@ -1286,6 +1456,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function townPortal() {
     if (mode !== "play" && mode !== "way") return;
     mode = "play";
+    if (!flags.has("keep")) {
+      say("Врата не знают твоего дома. Найди руину Двора на юге.");
+      emit(true);
+      return;
+    }
     if (map === "keep") {
       if (!fieldPortal) {
         say("Нет обратного портала. Выйди в ворота или открой камень пути.");
@@ -1358,6 +1533,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const s = SITES.find((x) => x.id === siteId);
     const opt = s?.options.find((o) => o.id === optId);
     if (!s || !opt || raised.has(siteId)) return;
+    if (map !== "over") {
+      say("Участок остался в диких землях.");
+      emit(true);
+      return;
+    }
     if (Math.abs(tileC() - s.c) + Math.abs(tileR() - s.r) > 3) {
       say("Дойди до участка.");
       emit(true);
@@ -1383,7 +1563,6 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (opt.gold) gold += opt.gold;
     if (opt.wood) for (let i = 0; i < opt.wood; i++) give("wood");
     if (opt.potion) give("potion");
-    if (opt.craft) siteCraft = true;
     if (opt.waypoint) stones.add(opt.waypoint);
     say(`${opt.name} стоит. ${opt.bonus}.`);
     audio.ok();
@@ -1393,7 +1572,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function rest() {
-    const plot = siteAt(tileC(), tileR());
+    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
     const pick = plot ? raised.get(plot.id) : undefined;
     const opt = plot?.options.find((o) => o.id === pick);
     const atHearth = map === "keep" && built.has("hearth");
@@ -1581,7 +1760,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     } else lavaT = 0;
 
     const n = npcNear(42);
-    const plot = siteAt(tileC(), tileR());
+    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
     hint = n
       ? `E — ${n.name}`
       : plot
@@ -2317,11 +2496,6 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     canvas.style.height = `${cssH}px`;
   }
 
-  function facePointer(e: PointerEvent) {
-    const w = worldFromEvent(e);
-    faceWorld(w.x, w.y);
-  }
-
   function worldFromEvent(e: PointerEvent | MouseEvent) {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -2375,6 +2549,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (e.repeat) return;
     keys.add(e.code);
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
+    if (mode === "pause") {
+      if (e.code === "Escape") {
+        mode = "play";
+        emit(true);
+      }
+      return;
+    }
     if (mode === "talk") {
       if (e.code === "Escape") {
         mode = "play";
@@ -2396,12 +2577,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       return;
     }
     if (mode !== "play") return;
+    if (e.code === "Escape") {
+      mode = "pause";
+      emit(true);
+      return;
+    }
     if (e.code === "KeyE") interact();
     if (e.code === "Space" || e.code === "KeyF") attack();
     if (e.code === "Digit1") cast(0);
     if (e.code === "Digit2") cast(1);
     if (e.code === "Digit3") cast(2);
-    if (e.code === "KeyU") usePotion();
+    if (e.code === "KeyU") drinkPotion();
     if (e.code === "KeyT") townPortal();
     if (e.code === "KeyM") {
       mode = "atlas";
@@ -2456,6 +2642,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     e.preventDefault();
   }
 
+  function onBlur() {
+    keys.clear();
+    injected.clear();
+    stickX = 0;
+    stickY = 0;
+  }
+
   resize();
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKeyDown);
@@ -2465,7 +2658,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
   canvas.addEventListener("contextmenu", onContext);
-  window.addEventListener("blur", () => keys.clear());
+  window.addEventListener("blur", onBlur);
 
   window.__controlsTest = {
     getYaw: () => dir,
@@ -2491,6 +2684,25 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     start(id: HeroId) {
       audio.unlock();
       reset(id);
+      emit(true);
+    },
+    continueGame() {
+      audio.unlock();
+      const restored = restoreGame();
+      emit(true);
+      return restored;
+    },
+    pause() {
+      if (mode === "play") mode = "pause";
+      else if (mode === "pause") mode = "play";
+      emit(true);
+    },
+    returnToMenu() {
+      if (mode === "menu") return;
+      persistGame(true);
+      mode = "menu";
+      talkNpc = null;
+      lastAsk = "";
       emit(true);
     },
     keyword: doKeyword,
@@ -2533,7 +2745,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       else if (mode === "play") mode = "journal";
       emit(true);
     },
-    usePotion,
+    usePotion: drinkPotion,
     closePanel() {
       if (mode === "talk" || mode === "inv" || mode === "journal" || mode === "way" || mode === "build" || mode === "atlas" || mode === "site") {
         mode = "play";
@@ -2571,6 +2783,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       window.removeEventListener("resize", resize);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       canvas.removeEventListener("pointerdown", onPointer);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);

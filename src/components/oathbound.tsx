@@ -1,4 +1,5 @@
 import {
+  Menu,
   ScrollText,
   Volume2,
   VolumeX,
@@ -50,6 +51,7 @@ const IDLE: Snapshot = {
   sites: [],
   nearSite: null,
   landmarks: [],
+  canContinue: false,
 };
 
 const ICO: Record<SpellId | "melee" | "portal" | "bag" | "gold" | "food" | "keep" | "way", number> = {
@@ -371,6 +373,9 @@ export function Oathbound() {
               <button type="button" className="hud-slot" onClick={() => g.current?.toggleMute()} aria-label="Звук" title="Звук">
                 {snap.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
               </button>
+              <button type="button" className="hud-slot" onClick={() => g.current?.pause()} aria-label="Пауза" title="Пауза">
+                <Menu className="size-5" />
+              </button>
             </div>
           </div>
         ) : null}
@@ -391,8 +396,8 @@ export function Oathbound() {
                 onClick={() => g.current?.select(i)}
               />
             ))}
-            <Slot label="T" name="Врата" icon={<HudIco id="portal" />} ready={0} max={1} onClick={() => g.current?.townPortal()} />
-            <Slot label="" name={snap.inKeep ? "Двор" : "Замок"} icon={<HudIco id="keep" />} ready={0} max={1} onClick={() => g.current?.goCastle()} />
+            <Slot label="T" name={snap.keepClaimed ? "Врата" : "Врата закрыты"} icon={<HudIco id="portal" />} ready={0} max={1} disabled={!snap.keepClaimed || snap.mode !== "play"} onClick={() => g.current?.townPortal()} />
+            <Slot label="" name={snap.inKeep ? "Двор" : snap.keepClaimed ? "Во Двор" : "Найди Двор"} icon={<HudIco id="keep" />} ready={0} max={1} disabled={!snap.keepClaimed} onClick={() => g.current?.goCastle()} />
             <Slot label="M" name="Карта мира" icon={<HudIco id="way" />} ready={0} max={1} onClick={() => g.current?.toggleAtlas()} />
             {snap.inKeep || snap.nearSite ? (
               <Button variant="ghost" size="sm" onClick={() => g.current?.toggleBuild()}>Строить</Button>
@@ -417,47 +422,77 @@ export function Oathbound() {
 
         {snap.mode === "menu" ? (
           <div className="absolute inset-0 flex items-center justify-center p-3 md:p-8 pointer-events-auto overflow-auto hud-ink">
-            <div className="grid w-full max-w-5xl gap-6 md:grid-cols-3">
-              {HERO_LIST.map((id) => {
-                const h = HEROES[id];
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => g.current?.start(id)}
-                    className="group flex flex-col items-center text-center"
-                  >
-                    <img
-                      src={`/portraits/${id}.png`}
-                      alt={h.name}
-                      className="h-48 md:h-64 w-full object-contain object-bottom"
-                    />
-                    <div className="relative mt-1 flex h-24 items-end justify-center">
-                      <span className="absolute bottom-2 h-3 w-16 rounded-full bg-fg/20" aria-hidden />
-                      <div
-                        className="hero-sprite"
-                        style={{ backgroundImage: `url(/sprites/${h.sheet}.png)` }}
-                        aria-hidden
+            <div className="w-full max-w-5xl py-6">
+              <header className="mb-7 text-center">
+                <p className="font-mono text-xs tracking-[0.35em] text-muted">ДВОР · КОДЕКС · КИЛЬ</p>
+                <h1 className="mt-2 font-display text-4xl font-semibold tracking-wide md:text-6xl">OATHBOUND</h1>
+                <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
+                  Верни украденный Кодекс, подними свой Двор и реши, какой клятве принадлежит твоё имя.
+                </p>
+                {snap.canContinue ? (
+                  <Button className="mt-5 min-w-56" onClick={() => g.current?.continueGame()}>
+                    Продолжить
+                  </Button>
+                ) : null}
+                <p className="mt-5 font-mono text-xs tracking-widest text-subtle">{snap.canContinue ? "НОВАЯ ИГРА" : "ВЫБЕРИ ГЕРОЯ"}</p>
+              </header>
+              <div className="grid gap-8 md:grid-cols-3">
+                {HERO_LIST.map((id) => {
+                  const h = HEROES[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => g.current?.start(id)}
+                      className="group flex flex-col items-center text-center"
+                    >
+                      <img
+                        src={`/portraits/${id}.png`}
+                        alt={h.name}
+                        className="h-48 md:h-56 w-full object-contain object-bottom"
                       />
-                    </div>
-                    <p className="mt-1 font-display text-3xl font-semibold">{h.name}</p>
-                    <div className="mt-3 w-36">
-                      <div className="stat-bar h-2"><i className="bg-danger" style={{ width: `${(h.hp / HP_CAP) * 100}%` }} /></div>
-                      <div className="stat-bar mt-1 h-2"><i className="bg-ok" style={{ width: `${(h.mp / MP_CAP) * 100}%` }} /></div>
-                    </div>
-                    <div className="mt-4 flex justify-center gap-3">
-                      {h.spells.map((sid) => (
+                      <div className="relative mt-1 flex h-24 items-end justify-center">
+                        <span className="absolute bottom-2 h-3 w-16 rounded-full bg-fg/20" aria-hidden />
+                        <div
+                          className="hero-sprite"
+                          style={{ backgroundImage: `url(/sprites/${h.sheet}.png)` }}
+                          aria-hidden
+                        />
+                      </div>
+                      <p className="mt-1 font-display text-3xl font-semibold">{h.name}</p>
+                      <p className="mt-1 text-xs text-muted">{h.title}</p>
+                      <div className="mt-3 w-36">
+                        <div className="stat-bar h-2"><i className="bg-danger" style={{ width: `${(h.hp / HP_CAP) * 100}%` }} /></div>
+                        <div className="stat-bar mt-1 h-2"><i className="bg-ok" style={{ width: `${(h.mp / MP_CAP) * 100}%` }} /></div>
+                      </div>
+                      <div className="mt-4 flex justify-center gap-3">
+                        {h.spells.map((sid) => (
                           <span key={sid} className="pick-spell">
                             <span className="hud-slot" aria-hidden>
                               <HudIco id={sid} />
                             </span>
                             <span className="font-mono text-xs text-muted whitespace-nowrap">{SPELLS[sid].name}</span>
                           </span>
-                      ))}
-                    </div>
-                  </button>
-                );
-              })}
+                        ))}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {snap.mode === "pause" ? (
+          <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto bg-bg/75 backdrop-blur-sm hud-ink">
+            <div className="overlay-card w-full max-w-sm text-center">
+              <p className="font-mono text-xs tracking-widest text-muted">ИГРА СОХРАНЕНА</p>
+              <h2 className="mt-2 font-display text-3xl font-semibold">Пауза</h2>
+              <div className="mt-6 flex flex-col gap-2">
+                <Button onClick={() => g.current?.pause()}>Продолжить</Button>
+                <Button variant="ghost" onClick={() => g.current?.returnToMenu()}>Сохранить и выйти в меню</Button>
+              </div>
+              <p className="mt-4 font-mono text-xs text-subtle">Esc — продолжить</p>
             </div>
           </div>
         ) : null}
@@ -557,23 +592,25 @@ export function Oathbound() {
         {snap.mode === "build" ? (
           <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto overflow-auto hud-ink">
             <div className="overlay-card w-full max-w-lg">
-              <p className="font-mono text-xs tracking-widest text-muted">ДВОР КЛЯТВЫ</p>
-              <h2 className="mt-1 font-display text-xl font-semibold">Стройка</h2>
-              <ul className="mt-4">
-                {snap.buildings.map((b) => (
-                  <li key={b.id} className="choice flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">{b.name}</p>
-                      <p className="text-xs text-muted mt-1">{b.desc}</p>
-                    </div>
-                    {b.built ? (
-                      <span className="font-mono text-xs text-ok">стоит</span>
-                    ) : (
-                      <Button size="sm" variant="ghost" onClick={() => g.current?.build(b.id)}>{b.cost} зол.</Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : "МАСТЕРСКАЯ"}</p>
+              <h2 className="mt-1 font-display text-xl font-semibold">{snap.inKeep ? "Стройка" : "Ремесло"}</h2>
+              {snap.inKeep ? (
+                <ul className="mt-4">
+                  {snap.buildings.map((b) => (
+                    <li key={b.id} className="choice flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{b.name}</p>
+                        <p className="text-xs text-muted mt-1">{b.desc}</p>
+                      </div>
+                      {b.built ? (
+                        <span className="font-mono text-xs text-ok">стоит</span>
+                      ) : (
+                        <Button size="sm" variant="ghost" disabled={!b.ok} onClick={() => g.current?.build(b.id)}>{b.cost} зол.</Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {snap.canRest ? <Button className="mt-4" variant="ghost" onClick={() => g.current?.rest()}>Отдых у очага</Button> : null}
               {snap.canCraft ? (
                 <div className="mt-5">
