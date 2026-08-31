@@ -42,7 +42,9 @@ const IDLE: Snapshot = {
   wep: "Ржавый меч",
   arm: "Кожа",
   cloak: "без плаща",
-  equipment: { wep: "sword", arm: "leather", cloak: null },
+  helm: "без шлема",
+  equipment: { wep: "sword", arm: "leather", cloak: null, helm: null },
+  tide: null,
   guise: "oath",
   goldFlash: 0,
   activeSlot: 0,
@@ -347,8 +349,14 @@ export function Oathbound() {
               <p className="mt-2 font-mono text-xs tabular-nums text-muted">
                 {Math.ceil(snap.hp)}/{snap.maxHp} · {Math.floor(snap.mp)}/{snap.maxMp} · ур. {snap.level}
               </p>
-              <p className="mt-1 text-xs text-subtle">{snap.wep} · {snap.arm} · {snap.cloak}</p>
+              <p className="mt-1 text-xs text-subtle">{snap.wep} · {snap.arm} · {snap.cloak} · {snap.helm}</p>
               <p className="mt-1 font-mono text-xs text-muted">{GUISE_RU[snap.guise]}</p>
+              {snap.tide ? (
+                <div className="mt-2">
+                  <p className="font-mono text-[10px] tracking-widest text-muted">{snap.tide.label}</p>
+                  <div className="stat-bar mt-1 h-1"><i className="bg-ok" style={{ width: `${Math.round(snap.tide.level * 100)}%` }} /></div>
+                </div>
+              ) : null}
             </div>
           </aside>
         ) : null}
@@ -667,7 +675,7 @@ export function Oathbound() {
                       className="choice"
                       onClick={() => { if (it.slot) g.current?.equip(it.id); }}
                     >
-                      <p className="text-sm font-medium">{it.name}{it.on ? " · на тебе" : it.slot ? " · надеть" : ""}</p>
+                      <p className="text-sm font-medium">{it.name}{it.count > 1 ? ` ×${it.count}` : ""}{it.on ? " · на тебе" : it.slot ? " · надеть" : ""}</p>
                       <p className="text-xs text-muted mt-1">{it.desc}</p>
                     </button>
                   </li>

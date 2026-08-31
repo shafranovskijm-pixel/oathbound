@@ -1,5 +1,5 @@
 export const TILE = 32;
-export type MapId = "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle";
+export type MapId = "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle" | "grotto";
 export type TileCh = string;
 
 function parse(raw: string): TileCh[][] {
@@ -238,12 +238,37 @@ function buildIsle(): TileCh[][] {
     for (let c = 12; c <= 14; c++) t[r][c] = "K";
   }
   t[6][28] = "H";
+  t[6][29] = "p";
+  t[7][29] = "p";
+  t[7][30] = "D";
   const usable = [
     [6, 20], [7, 20], [6, 19], [7, 18], [21, 20], [9, 20], [23, 17], [28, 12],
     [17, 10], [25, 7], [12, 20], [29, 16], [6, 13], [9, 16], [15, 19], [21, 14],
-    [26, 16], [29, 11], [18, 8], [28, 6],
+    [26, 16], [29, 11], [18, 8], [28, 6], [29, 6], [29, 7], [30, 7],
   ];
   for (const [c, r] of usable) if (t[r]?.[c] === "~" || t[r]?.[c] === "M") t[r][c] = ",";
+  return t;
+}
+
+function buildGrotto(): TileCh[][] {
+  const cols = 22;
+  const rows = 16;
+  const t: TileCh[][] = Array.from({ length: rows }, () => Array<TileCh>(cols).fill("W"));
+  for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) t[r][c] = "d";
+  for (let r = 3; r <= 12; r++) {
+    for (let c = 2; c <= 5; c++) t[r][c] = "~";
+    for (let c = 16; c <= 19; c++) t[r][c] = "~";
+  }
+  for (let c = 6; c <= 15; c++) {
+    if (c < 9 || c > 12) t[8][c] = "~";
+  }
+  for (let r = 2; r <= 6; r++) {
+    t[r][7] = "W";
+    t[r][14] = "W";
+  }
+  t[3][11] = "H";
+  t[14][10] = "d";
+  t[15][10] = "p";
   return t;
 }
 
@@ -257,6 +282,7 @@ export const MAPS: Record<MapId, TileCh[][]> = {
   keep: parse(KEEP),
   ship: parse(SHIP),
   isle: buildIsle(),
+  grotto: buildGrotto(),
 };
 
 export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
@@ -269,6 +295,7 @@ export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
   keep: { cols: MAPS.keep[0].length, rows: MAPS.keep.length },
   ship: { cols: MAPS.ship[0].length, rows: MAPS.ship.length },
   isle: { cols: MAPS.isle[0].length, rows: MAPS.isle.length },
+  grotto: { cols: MAPS.grotto[0].length, rows: MAPS.grotto.length },
 };
 
 export const SPAWN: Record<MapId, { c: number; r: number }> = {
@@ -281,6 +308,7 @@ export const SPAWN: Record<MapId, { c: number; r: number }> = {
   keep: { c: 10, r: 11 },
   ship: { c: 7, r: 4 },
   isle: { c: 6, r: 19 },
+  grotto: { c: 10, r: 13 },
 };
 
 export const PLACE: Record<MapId, string> = {
@@ -293,6 +321,7 @@ export const PLACE: Record<MapId, string> = {
   keep: "Двор клятвы",
   ship: "Соляной киль",
   isle: "Остров киля",
+  grotto: "Приливный грот",
 };
 
 export const EXITS: Record<MapId, { c: number; r: number; to: MapId; tc: number; tr: number }[]> = {
@@ -335,7 +364,9 @@ export const EXITS: Record<MapId, { c: number; r: number; to: MapId; tc: number;
   isle: [
     { c: 6, r: 20, to: "ship", tc: 7, tr: 4 },
     { c: 7, r: 20, to: "ship", tc: 7, tr: 4 },
+    { c: 30, r: 7, to: "grotto", tc: 10, tr: 13 },
   ],
+  grotto: [{ c: 10, r: 15, to: "isle", tc: 29, tr: 7 }],
 };
 
 const SOLID = new Set(["~", "M", "W", "L", "#"]);

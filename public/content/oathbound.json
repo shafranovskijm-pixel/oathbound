@@ -113,6 +113,7 @@
     { "out": "sash", "gold": 20, "need": ["cloth", "cloth"] },
     { "out": "harpoon", "gold": 14, "need": ["driftwood", "ore", "cloth"] },
     { "out": "stormcloak", "gold": 16, "need": ["kelp", "kelp", "cloth"] },
-    { "out": "shellmail", "gold": 20, "need": ["shell", "shell", "hide"] }
+    { "out": "shellmail", "gold": 20, "need": ["shell", "shell", "hide"] },
+    { "out": "tidehelm", "gold": 28, "need": ["stormheart", "shell", "ore"] }
   ]
 }
