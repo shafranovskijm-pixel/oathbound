@@ -1,5 +1,5 @@
 import { GameAudio } from "./audio";
-import { ASK, CRAFT, DROP, GREET, ITEM, KEY_RU, MOB, NPCS, ROLE, SHOP, type Guise, type ItemId, type MobKind, type Npc, type Slot } from "./content";
+import { ASK, DROP, GREET, ITEM, KEY_RU, MOB, NPCS, ROLE, SHOP, type Guise, type ItemId, type MobKind, type Npc, type Slot } from "./content";
 import {
   HEROES,
   SPELLS,
@@ -9,7 +9,7 @@ import {
   type TalentId,
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
-import { LANDMARKS, SITES, siteAt, type SiteId } from "./data";
+import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, SITES, gatherNodeAt, siteAt, type SiteId } from "./data";
 import { readGameSave, writeGameSave, type GameSave, type SavedMode } from "./save";
 import {
   EXITS,
@@ -60,6 +60,7 @@ export type Snapshot = {
   wep: string;
   arm: string;
   cloak: string;
+  equipment: Record<Slot, ItemId | null>;
   guise: Guise;
   goldFlash: number;
   activeSlot: number;
@@ -68,6 +69,7 @@ export type Snapshot = {
   you: { c: number; r: number; map: MapId };
   sites: {
     id: SiteId;
+    map: MapId;
     name: string;
     blurb: string;
     c: number;
@@ -119,6 +121,20 @@ const FACE: Array<[number, number]> = [
   [1, 0],
   [0, -1],
 ];
+
+const STACKABLE_ITEMS = new Set<ItemId>([
+  "hide",
+  "ore",
+  "cloth",
+  "potion",
+  "wood",
+  "herb",
+  "driftwood",
+  "kelp",
+  "shell",
+]);
+
+const AUTO_EQUIP_ITEMS = new Set<ItemId>(["steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail"]);
 
 type Mob = {
   id: number;
@@ -274,6 +290,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let moveTo: { x: number; y: number } | null = null;
   let huntId = 0;
   let talkGo: Npc | null = null;
+  let interactGo: { c: number; r: number } | null = null;
   let holdLmb = false;
   let holdRmb = false;
   let aimX = 0;
@@ -356,13 +373,19 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       mkMob("crypt", 4, 4, "skel"),
       mkMob("crypt", 12, 3, "skel"),
       mkMob("crypt", 8, 2, "wraith"),
+      mkMob("isle", 9, 16, "crab"),
+      mkMob("isle", 15, 19, "crab"),
+      mkMob("isle", 21, 14, "crab"),
+      mkMob("isle", 26, 16, "crab"),
+      mkMob("isle", 29, 11, "crab"),
+      mkMob("isle", 18, 8, "crab"),
     ];
   }
   seedMobs();
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "npcs", "mobs", "props", "keep", "coin", "wreck", "shack", "beacon", "cave"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -381,11 +404,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
   function give(id: ItemId) {
     if (id === "food") food += 10;
-    else if (id === "hide" || id === "ore" || id === "cloth" || id === "potion" || id === "wood" || id === "herb" || !has(id)) items.push(id);
+    else if (STACKABLE_ITEMS.has(id) || !has(id)) items.push(id);
     audio.pickup();
     const slot = ITEM[id].slot;
-    if (slot && !worn[slot]) worn[slot] = id;
-    if (id === "steel" || id === "chain" || id === "sash" || id === "robe" || id === "shroud") {
+    if (slot && (!worn[slot] || AUTO_EQUIP_ITEMS.has(id))) worn[slot] = id;
+    if (slot && AUTO_EQUIP_ITEMS.has(id)) say(`Надето: ${ITEM[id].name}.`);
+    if (AUTO_EQUIP_ITEMS.has(id)) {
       burst(px, py, "#e8e4d8", 18);
       float(px, py - 20, ITEM[id].name, "#e8e4d8");
     }
@@ -418,8 +442,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function currentSiteOption() {
-    if (map !== "over") return null;
-    const site = siteAt(tileC(), tileR());
+    const site = siteAt(map, tileC(), tileR());
     if (!site) return null;
     return site.options.find((option) => option.id === raised.get(site.id)) ?? null;
   }
@@ -431,7 +454,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function craft(out: ItemId) {
     const r = CRAFT.find((x) => x.out === out);
     if (!r || !canCraftHere()) {
-      say("Нужна кузница во дворе или изба травника на участке.");
+      say("Нужна кузница во дворе или ремесленная постройка на участке.");
       emit(true);
       return;
     }
@@ -462,6 +485,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Сесть на корабль Рина (ур. 3 и кушак на себе)", done: flags.has("sailed") },
       { text: "Взять приливный камень на острове киля", done: has("tide") },
       { text: "Поднять постройку на участке (роща, межа, кряж, топь, мыс)", done: raised.size > 0 },
+      { text: "Основать убежище в бухте Соляного киля", done: raised.has("haven") },
+      { text: "Сковать островное снаряжение", done: has("harpoon") || has("stormcloak") || has("shellmail") },
     ];
   }
 
@@ -532,7 +557,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       portalOpen: !!fieldPortal,
       inKeep: map === "keep",
       canRest: (map === "keep" && built.has("hearth")) || (() => {
-        const p = siteAt(tileC(), tileR());
+        const p = siteAt(map, tileC(), tileR());
         if (!p) return false;
         const o = p.options.find((x) => x.id === raised.get(p.id));
         return !!o?.rest;
@@ -541,6 +566,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       wep: worn.wep ? ITEM[worn.wep].name : "кулаки",
       arm: worn.arm ? ITEM[worn.arm].name : "рубаха",
       cloak: worn.cloak ? ITEM[worn.cloak].name : "без плаща",
+      equipment: { ...worn },
       guise: guise(),
       goldFlash,
       activeSlot,
@@ -558,6 +584,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         const opt = s.options.find((o) => o.id === pick);
         return {
           id: s.id,
+          map: s.map,
           name: s.name,
           blurb: s.blurb,
           c: s.c,
@@ -573,7 +600,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           })),
         };
       }),
-      nearSite: map === "over" ? (siteAt(tileC(), tileR())?.id ?? null) : null,
+      nearSite: siteAt(map, tileC(), tileR())?.id ?? null,
       landmarks: LANDMARKS.map((l) => ({ ...l, c: l.id === "dock" ? DOCK.c : l.c, r: l.id === "dock" ? DOCK.r : l.r })),
       canContinue: saveAvailable,
     };
@@ -712,6 +739,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     moveTo = null;
     huntId = 0;
     talkGo = null;
+    interactGo = null;
     talkNpc = null;
     lastAsk = "";
     holdLmb = false;
@@ -848,6 +876,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     moveTo = null;
     huntId = 0;
     talkGo = null;
+    interactGo = null;
     holdLmb = false;
     holdRmb = false;
     shieldT = 0;
@@ -946,7 +975,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         talkNpc = null;
         lastAsk = "";
         mode = "play";
-        warp("isle", 7, 4, "Паруса. Остров киля.");
+        warp("isle", SPAWN.isle.c, SPAWN.isle.r, "Паруса. Архипелаг Соляного киля.");
         audio.ok();
       }
       emit(true);
@@ -981,10 +1010,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function armor() {
-    return baseArmor + mods.armor + siteArmor + (worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0);
+    return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0);
   }
   function meleeDmg() {
-    let d = 3 + Math.floor(str / 3) + (worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
+    let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
     if (markT > 0) {
       d *= 2;
       markT = 0;
@@ -1160,7 +1189,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (hasAim) faceWorld(aimX, aimY);
     meleeCd = heroId === "vessa" ? 0.42 : heroId === "kael" ? 0.32 : 0.38;
     const ang = aim();
-    const r = (heroId === "aldric" ? 46 : 34) * mods.slash;
+    const r = (worn.wep === "harpoon" ? 62 : heroId === "aldric" ? 46 : 34) * mods.slash;
     slashAt(px, py, ang, r, meleeDmg(), heroId === "aldric" ? "#e8e4d8" : "#c8d0c4", !!mods.whirl);
   }
 
@@ -1267,7 +1296,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function doGet() {
     const id = `${map}:${tileC()},${tileR()}`;
-    if (map === "hall" && tileC() === 10 && tileR() === 3 && !opened.has(id)) {
+    const node = gatherNodeAt(map, tileC(), tileR());
+    if (node && !opened.has(`node:${node.id}`)) {
+      opened.add(`node:${node.id}`);
+      for (let i = 0; i < node.amount; i++) give(node.item);
+      say(`${node.label}. +${node.amount} · ${ITEM[node.item].name}.`);
+      burst(node.c * TILE + 16, node.r * TILE + 16, "#d8d0a8", 12);
+    } else if (map === "hall" && tileC() === 10 && tileR() === 3 && !opened.has(id)) {
       opened.add(id);
       spawnLoot(px, py, 30);
       give("potion");
@@ -1285,7 +1320,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       opened.add("dock-sash");
       give("sash");
       say("С бочки у борта — мокрый кушак. Рин это увидит.");
-    } else if (map === "isle" && tileC() === 9 && tileR() === 3 && !opened.has("isle-chest")) {
+    } else if (map === "isle" && tileC() === 28 && tileR() === 6 && !opened.has("isle-chest")) {
       opened.add("isle-chest");
       spawnLoot(px, py, 40);
       give("tide");
@@ -1312,7 +1347,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       startTalk(n);
       return;
     }
-    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
+    const plot = siteAt(map, tileC(), tileR());
     if (plot) {
       const pick = raised.get(plot.id);
       if (!pick) {
@@ -1423,6 +1458,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     cam.y = py;
     exitLock = 0.7;
     portalLock = 0.8;
+    moveTo = null;
+    huntId = 0;
+    talkGo = null;
+    interactGo = null;
     if (to === "keep") {
       flags.add("keep");
       stones.add("keep");
@@ -1533,8 +1572,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const s = SITES.find((x) => x.id === siteId);
     const opt = s?.options.find((o) => o.id === optId);
     if (!s || !opt || raised.has(siteId)) return;
-    if (map !== "over") {
-      say("Участок остался в диких землях.");
+    if (map !== s.map) {
+      say("Дойди до отмеченного участка.");
       emit(true);
       return;
     }
@@ -1562,17 +1601,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (opt.food) food += opt.food;
     if (opt.gold) gold += opt.gold;
     if (opt.wood) for (let i = 0; i < opt.wood; i++) give("wood");
+    if (opt.cloth) for (let i = 0; i < opt.cloth; i++) give("cloth");
     if (opt.potion) give("potion");
     if (opt.waypoint) stones.add(opt.waypoint);
     say(`${opt.name} стоит. ${opt.bonus}.`);
     audio.ok();
     burst(s.c * TILE + 16, s.r * TILE + 16, "#d8c070", 18);
-    mode = "play";
+    mode = opt.craft ? "build" : "play";
     emit(true);
   }
 
   function rest() {
-    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
+    const plot = siteAt(map, tileC(), tileR());
     const pick = plot ? raised.get(plot.id) : undefined;
     const opt = plot?.options.find((o) => o.id === pick);
     const atHearth = map === "keep" && built.has("hearth");
@@ -1714,6 +1754,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         startTalk(n);
       } else moveTo = { x: talkGo.c * TILE + 16, y: talkGo.r * TILE + 16 };
     }
+    if (interactGo) {
+      const d = Math.hypot(interactGo.c * TILE + 16 - px, interactGo.r * TILE + 16 - py);
+      if (d < 34) {
+        interactGo = null;
+        moveTo = null;
+        interact();
+      } else moveTo = { x: interactGo.c * TILE + 16, y: interactGo.r * TILE + 16 };
+    }
     if (huntId) {
       const prey = mobs.find((m) => m.id === huntId && m.hp > 0 && m.map === map);
       if (!prey) huntId = 0;
@@ -1760,10 +1808,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     } else lavaT = 0;
 
     const n = npcNear(42);
-    const plot = map === "over" ? siteAt(tileC(), tileR()) : null;
+    const node = gatherNodeAt(map, tileC(), tileR(), 2);
+    const gather = node && !opened.has(`node:${node.id}`) ? node : null;
+    const plot = siteAt(map, tileC(), tileR());
     hint = n
       ? `E — ${n.name}`
-      : plot
+      : gather
+        ? `E / ЛКМ — ${gather.label}`
+        : plot
         ? raised.has(plot.id)
           ? `E — ${plot.name}: ${raised.get(plot.id)}`
           : `E — участок: ${plot.name}. Выбери постройку`
@@ -1775,7 +1827,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
               ? "E — бочка с кушаком · на борт Соляного киля"
               : map === "over"
                 ? "M — карта мира · E в лесу — дерево, в топи — трава"
-                : "ЛКМ — идти и бить · ПКМ — активка · WASD";
+                : map === "isle"
+                  ? "ЛКМ — подсвеченные ресурсы и стройки · ПКМ — активка"
+                  : "ЛКМ — идти и бить · ПКМ — активка · WASD";
     for (const w of WAYPOINTS) {
       if (w.map !== map || stones.has(w.id)) continue;
       if (Math.hypot(w.c * TILE + 16 - px, w.r * TILE + 16 - py) < 48) {
@@ -2077,6 +2131,33 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     ctx.restore();
   }
 
+  function drawInteractionPulse(x: number, y: number, label?: string, strong = false) {
+    const p = wrld(x, y);
+    const pulse = 0.55 + Math.sin(time * 5.5) * 0.2;
+    const near = Math.hypot(x - px, y - py) < 132;
+    ctx.save();
+    ctx.globalAlpha = pulse * (strong ? 0.95 : 0.72);
+    ctx.strokeStyle = strong ? "#f0d58a" : "#b9d8ca";
+    ctx.lineWidth = strong ? 3 : 2;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + 7, strong ? 20 : 15, strong ? 10 : 7, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha *= 0.18;
+    ctx.fillStyle = strong ? "#f0d58a" : "#b9d8ca";
+    ctx.fill();
+    if (near && label) {
+      ctx.globalAlpha = 0.94;
+      ctx.fillStyle = "rgba(10,12,16,0.84)";
+      ctx.font = "11px IBM Plex Mono, monospace";
+      ctx.textAlign = "center";
+      const width = ctx.measureText(label).width + 12;
+      ctx.fillRect(p.x - width / 2, p.y - 30, width, 17);
+      ctx.fillStyle = "#f0eadc";
+      ctx.fillText(label, p.x, p.y - 18);
+    }
+    ctx.restore();
+  }
+
   function wrld(x: number, y: number) {
     const sx = shake > 0 ? (Math.random() - 0.5) * 10 * shake : 0;
     const sy = shake > 0 ? (Math.random() - 0.5) * 10 * shake : 0;
@@ -2098,6 +2179,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           ch === "~" ? "#1a3340" : ch === "M" || ch === "W" ? "#3a3a3a" : ch === "f" ? "#2a4a32" : ch === "p" || ch === "T" ? "#8a7a5a" : ch === "L" ? "#a04020" : "#3d5c4a";
         ctx.fillRect(x0 + (c / size.cols) * mw, y0 + (r / size.rows) * mh, Math.ceil(mw / size.cols), Math.ceil(mh / size.rows));
       }
+    }
+    for (const node of GATHER_NODES) {
+      if (node.map !== map || opened.has(`node:${node.id}`)) continue;
+      ctx.fillStyle = "#b9d8ca";
+      ctx.fillRect(x0 + ((node.c + 0.5) / size.cols) * mw - 1, y0 + ((node.r + 0.5) / size.rows) * mh - 1, 3, 3);
+    }
+    for (const site of SITES) {
+      if (site.map !== map) continue;
+      ctx.fillStyle = raised.has(site.id) ? "#d8c070" : "#f0d58a";
+      ctx.fillRect(x0 + ((site.c + 0.5) / size.cols) * mw - 2, y0 + ((site.r + 0.5) / size.rows) * mh - 2, 4, 4);
     }
     ctx.fillStyle = "#e8e4d8";
     ctx.fillRect(x0 + (px / (size.cols * TILE)) * mw - 1, y0 + (py / (size.rows * TILE)) * mh - 1, 3, 3);
@@ -2139,45 +2230,74 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillStyle = "rgba(8,12,28,0.32)";
       ctx.fillRect(0, 0, cssW, cssH);
     }
+    if (map === "isle") {
+      ctx.fillStyle = "rgba(150,182,176,0.08)";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.save();
+      for (let i = 0; i < 5; i++) {
+        const drift = (time * (10 + i * 2) + i * 173) % (cssW + 280) - 140;
+        const y = 56 + ((i * 137) % Math.max(120, cssH - 80));
+        ctx.globalAlpha = 0.035 + i * 0.008;
+        ctx.fillStyle = "#d7e4df";
+        ctx.beginPath();
+        ctx.ellipse(drift, y, 120 + i * 18, 22 + i * 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     if ((map === "hall" && !opened.has("hall:10,3")) || (map === "inn" && !opened.has("inn:3,4")) || (map === "dungeon" && !opened.has("dungeon:3,3"))) {
       const chests = map === "hall" ? [[10, 3]] : map === "inn" ? [[3, 4]] : [[3, 3]];
       for (const [c, r] of chests) {
         const s = wrld(c * TILE, r * TILE);
         sheet(imgs.props, 0, s.x, s.y - 4, 32);
+        drawInteractionPulse(c * TILE + 16, r * TILE + 16, "Открыть", true);
       }
     }
     if (map === "crypt" && !has("codex")) {
       const s = wrld(8 * TILE, 2 * TILE);
       sheet(imgs.props, 3, s.x, s.y - 6, 32);
+      drawInteractionPulse(8 * TILE + 16, 2 * TILE + 16, "Кодекс", true);
     }
     if (map === "isle" && !opened.has("isle-chest")) {
-      const s = wrld(9 * TILE, 3 * TILE);
+      const s = wrld(28 * TILE, 6 * TILE);
       sheet(imgs.props, 0, s.x, s.y - 4, 32);
+      drawInteractionPulse(28 * TILE + 16, 6 * TILE + 16, "Приливный камень", true);
     }
     if (map === "over") {
       const s = wrld(25 * TILE, 6 * TILE);
       sheet(imgs.props, 1, s.x, s.y, 40);
+      if (!has("mark")) drawInteractionPulse(26 * TILE + 16, 7 * TILE + 16, "Алтарь клятвы", true);
       const sh = wrld(DOCK.c * TILE - 10, DOCK.r * TILE - 28);
       if (imgs.wreck) blit(imgs.wreck, sh.x, sh.y, 52, 36);
       else sheet(imgs.props, 1, sh.x, sh.y, 44);
-      for (const s of SITES) {
-        const p = wrld(s.c * TILE - 8, s.r * TILE - 18);
-        const pick = raised.get(s.id);
-        const opt = s.options.find((o) => o.id === pick);
-        if (!opt) {
-          ctx.fillStyle = "rgba(20,16,12,0.55)";
-          ctx.beginPath();
-          ctx.ellipse(p.x + 24, p.y + 40, 16, 9, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = "rgba(232,228,216,0.55)";
-          ctx.fillRect(p.x + 18, p.y + 22, 14, 8);
-          continue;
-        }
-        if (opt.sprite === "keep" && imgs.keep) sheetGrid(imgs.keep, opt.frame, 3, 2, p.x, p.y, 48);
-        else if (imgs[opt.sprite]) blit(imgs[opt.sprite], p.x, p.y, 46, 40);
-        else sheet(imgs.props, 1, p.x, p.y, 40);
+      if (!opened.has("dock-sash")) drawInteractionPulse(DOCK.c * TILE + 16, DOCK.r * TILE + 16, "Кушак на бочке", true);
+    }
+    for (const node of GATHER_NODES) {
+      if (node.map !== map || opened.has(`node:${node.id}`)) continue;
+      const p = wrld(node.c * TILE, node.r * TILE - 7);
+      sheetGrid(imgs.items, node.sprite, 3, 3, p.x, p.y, 32);
+      drawInteractionPulse(node.c * TILE + 16, node.r * TILE + 16, node.label, true);
+    }
+    for (const s of SITES) {
+      if (s.map !== map) continue;
+      const p = wrld(s.c * TILE - 8, s.r * TILE - 18);
+      const pick = raised.get(s.id);
+      const opt = s.options.find((o) => o.id === pick);
+      if (!opt) {
+        ctx.fillStyle = "rgba(20,16,12,0.55)";
+        ctx.beginPath();
+        ctx.ellipse(p.x + 24, p.y + 40, 18, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(240,213,138,0.72)";
+        ctx.fillRect(p.x + 10, p.y + 22, 28, 8);
+        drawInteractionPulse(s.c * TILE + 16, s.r * TILE + 16, `Строить: ${s.name}`, true);
+        continue;
       }
+      if (opt.sprite === "keep" && imgs.keep) sheetGrid(imgs.keep, opt.frame, 3, 2, p.x, p.y, 48);
+      else if (imgs[opt.sprite]) blit(imgs[opt.sprite], p.x, p.y, 46, 40);
+      else sheet(imgs.props, 1, p.x, p.y, 40);
+      if (opt.craft || opt.rest) drawInteractionPulse(s.c * TILE + 16, s.r * TILE + 16, opt.craft ? "Мастерская" : "Отдохнуть");
     }
     if (map === "keep") {
       for (const b of BUILDINGS) {
@@ -2229,6 +2349,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fill();
       ctx.stroke();
       ctx.restore();
+      if (!on) drawInteractionPulse(w.c * TILE + 16, w.r * TILE + 16, `Камень пути: ${w.name}`);
     }
 
     for (const n of NPCS) {
@@ -2236,6 +2357,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const s = wrld(n.c * TILE, n.r * TILE - 10);
       sheet(imgs.npcs, n.sprite, s.x, s.y, 36);
       const near = Math.hypot(n.c * TILE + 16 - px, n.r * TILE + 16 - py) < 52;
+      drawInteractionPulse(n.c * TILE + 16, n.r * TILE + 16, near ? n.name : undefined);
       if (near) {
         ctx.font = "11px IBM Plex Mono, monospace";
         ctx.fillStyle = "rgba(232,228,216,0.9)";
@@ -2248,7 +2370,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (m.map !== map || m.hp <= 0) continue;
       const s = wrld(m.x - 16, m.y - 20);
       if (m.flash > 0) ctx.filter = "brightness(2.4)";
-      sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, 34);
+      if (m.kind === "crab") sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, 34);
+      else sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, 34);
       ctx.filter = "none";
       ctx.fillStyle = "#2a1818";
       ctx.fillRect(s.x, s.y - 6, 34, 4);
@@ -2327,7 +2450,25 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.restore();
     }
     if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.45;
-    if (worn.arm === "chain") {
+    if (worn.arm === "shellmail") {
+      ctx.save();
+      ctx.filter = "brightness(1.08) saturate(0.76) hue-rotate(24deg)";
+      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, 38);
+      ctx.restore();
+      ctx.fillStyle = "#d8d0a8";
+      ctx.beginPath();
+      ctx.ellipse(cx - 10, cy - 8, 7, 5, -0.35, 0, Math.PI * 2);
+      ctx.ellipse(cx + 10, cy - 8, 7, 5, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#4d7773";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, cy - 1);
+      ctx.lineTo(cx + 9, cy + 6);
+      ctx.moveTo(cx + 9, cy - 1);
+      ctx.lineTo(cx - 9, cy + 6);
+      ctx.stroke();
+    } else if (worn.arm === "chain") {
       ctx.save();
       ctx.filter = "brightness(1.18) saturate(0.7)";
       sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, 38);
@@ -2350,12 +2491,51 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.globalAlpha = 0.7;
       ctx.fillRect(cx - 12, cy - 4, 24, 16);
       ctx.globalAlpha = 1;
+    } else if (worn.cloak === "stormcloak") {
+      ctx.fillStyle = "#183f3c";
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.moveTo(cx - 13, cy - 8);
+      ctx.lineTo(cx + 13, cy - 8);
+      ctx.lineTo(cx + 16, cy + 16);
+      ctx.lineTo(cx, cy + 11);
+      ctx.lineTo(cx - 16, cy + 16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#79a69b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 9, 10, Math.PI, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     const angW = aim();
     const fx = Math.cos(angW);
     const fy = Math.sin(angW);
     const steel = worn.wep === "steel";
-    if (heroId === "vessa") {
+    if (worn.wep === "harpoon") {
+      const len = 29;
+      ctx.strokeStyle = "#725437";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx - fx * 9, cy - fy * 9 + 5);
+      ctx.lineTo(cx + fx * len, cy + fy * len - 4);
+      ctx.stroke();
+      const tx = cx + fx * len;
+      const ty = cy + fy * len - 4;
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(angW);
+      ctx.fillStyle = "#b9d8ca";
+      ctx.beginPath();
+      ctx.moveTo(10, 0);
+      ctx.lineTo(-3, -5);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(-3, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (heroId === "vessa") {
       ctx.strokeStyle = "#6a5a40";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -2515,10 +2695,36 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     else dir = dy < 0 ? 3 : 0;
   }
 
+  function interactionTargetAt(wx: number, wy: number) {
+    const candidates: { c: number; r: number; d: number }[] = [];
+    const consider = (c: number, r: number, radius = 30) => {
+      const d = Math.hypot(c * TILE + 16 - wx, r * TILE + 16 - wy);
+      if (d <= radius) candidates.push({ c, r, d });
+    };
+    for (const node of GATHER_NODES) {
+      if (node.map === map && !opened.has(`node:${node.id}`)) consider(node.c, node.r, 32);
+    }
+    for (const site of SITES) {
+      if (site.map === map) consider(site.c, site.r, 44);
+    }
+    for (const waypoint of WAYPOINTS) {
+      if (waypoint.map === map && !stones.has(waypoint.id)) consider(waypoint.c, waypoint.r, 28);
+    }
+    if (map === "hall" && !opened.has("hall:10,3")) consider(10, 3);
+    if (map === "inn" && !opened.has("inn:3,4")) consider(3, 4);
+    if (map === "dungeon" && !opened.has("dungeon:3,3")) consider(3, 3);
+    if (map === "over" && !opened.has("dock-sash")) consider(DOCK.c, DOCK.r, 36);
+    if (map === "over" && !has("mark")) consider(26, 7, 34);
+    if (map === "crypt" && !has("codex")) consider(8, 2, 34);
+    if (map === "isle" && !opened.has("isle-chest")) consider(28, 6, 34);
+    return candidates.reduce<(typeof candidates)[number] | null>((best, candidate) => (!best || candidate.d < best.d ? candidate : best), null);
+  }
+
   function clickLeft(wx: number, wy: number) {
     faceWorld(wx, wy);
     huntId = 0;
     talkGo = null;
+    interactGo = null;
     for (const n of NPCS) {
       if (n.map !== map || (n.id === "lyra" && lyra)) continue;
       if (Math.hypot(n.c * TILE + 16 - wx, n.r * TILE + 8 - wy) < 22) {
@@ -2526,6 +2732,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         moveTo = { x: n.c * TILE + 16, y: n.r * TILE + 16 };
         return;
       }
+    }
+    const target = interactionTargetAt(wx, wy);
+    if (target) {
+      interactGo = { c: target.c, r: target.r };
+      moveTo = { x: target.c * TILE + 16, y: target.r * TILE + 16 };
+      return;
     }
     for (const m of mobs) {
       if (m.map !== map || m.hp <= 0) continue;
@@ -2595,7 +2807,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     if (e.code === "KeyB") {
       if (map === "keep") mode = "build";
-      else if (map === "over" && siteAt(tileC(), tileR())) mode = "site";
+      else if (siteAt(map, tileC(), tileR())) mode = "site";
       emit(true);
     }
     if (e.code === "KeyI" || e.code === "Tab") {
@@ -2730,7 +2942,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     toggleBuild() {
       if (mode === "build" || mode === "site") mode = "play";
       else if (map === "keep" && (mode === "play" || mode === "way" || mode === "atlas")) mode = "build";
-      else if (map === "over" && siteAt(tileC(), tileR()) && mode === "play") mode = "site";
+      else if (mode === "play") {
+        const site = siteAt(map, tileC(), tileR());
+        const option = site?.options.find((candidate) => candidate.id === raised.get(site.id));
+        if (site) mode = option?.craft ? "build" : "site";
+      }
       emit(true);
     },
     build: doBuild,

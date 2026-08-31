@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "npm run test:game",
-    "test:game": "node --experimental-strip-types --test src/game/save.test.ts src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts",
+    "test:game": "node --experimental-strip-types --test src/game/save.test.ts src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts scripts/island-content.test.mjs",
     "test:template": "node --test 'scripts/**/*.test.mjs'",
     "lint": "eslint .",
     "format": "prettier --write ."

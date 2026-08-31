@@ -69,7 +69,7 @@ type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const HERO_IDS = new Set(["aldric", "vessa", "kael"]);
 const MAP_IDS = new Set(["over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle"]);
 const MODES = new Set(["play", "talent", "dead", "win"]);
-const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith"]);
+const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab"]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
