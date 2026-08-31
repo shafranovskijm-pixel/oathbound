@@ -23,7 +23,7 @@ const BASE: GameSave = {
   baseSpd: 118,
   baseArmor: 2,
   items: ["sword", "leather"],
-  worn: { wep: "sword", arm: "leather", cloak: null },
+  worn: { wep: "sword", arm: "leather", cloak: null, helm: null },
   lyra: false,
   lyraHp: 18,
   flags: [],
@@ -58,4 +58,11 @@ test("corrupt and incompatible saves fail closed", () => {
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, version: 2 })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, hp: "many" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, map: "nowhere" })), null);
+});
+
+test("legacy saves without the helmet slot still load", () => {
+  const legacy = { ...BASE, worn: { wep: "sword", arm: "leather", cloak: null } };
+  const decoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(decoded);
+  assert.equal(decoded.worn.helm, undefined);
 });

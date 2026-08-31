@@ -28,6 +28,7 @@ export type SavedMob = {
 export type GameSave = {
   version: typeof SAVE_VERSION;
   updatedAt: number;
+  worldTime?: number;
   mode: SavedMode;
   heroId: HeroId;
   map: MapId;
@@ -67,9 +68,9 @@ export type GameSave = {
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const HERO_IDS = new Set(["aldric", "vessa", "kael"]);
-const MAP_IDS = new Set(["over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle"]);
+const MAP_IDS = new Set(["over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
 const MODES = new Set(["play", "talent", "dead", "win"]);
-const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab"]);
+const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine"]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -115,6 +116,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     const value: unknown = JSON.parse(raw);
     if (!record(value)) return null;
     if (value.version !== SAVE_VERSION || !finite(value.updatedAt)) return null;
+    if (value.worldTime !== undefined && !finite(value.worldTime)) return null;
     if (typeof value.mode !== "string" || !MODES.has(value.mode)) return null;
     if (typeof value.heroId !== "string" || !HERO_IDS.has(value.heroId)) return null;
     if (typeof value.map !== "string" || !MAP_IDS.has(value.map)) return null;

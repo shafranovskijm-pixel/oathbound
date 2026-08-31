@@ -25,10 +25,12 @@ export type ItemId =
   | "shell"
   | "harpoon"
   | "stormcloak"
-  | "shellmail";
+  | "shellmail"
+  | "stormheart"
+  | "tidehelm";
 
 export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn";
-export type Slot = "wep" | "arm" | "cloak";
+export type Slot = "wep" | "arm" | "cloak" | "helm";
 export type Guise = "oath" | "mage" | "thief" | "pirate";
 
 export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> = {
@@ -57,6 +59,8 @@ export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> =
   harpoon: { name: "Гарпун киля", desc: "Длинное древко и тяжёлое соляное жало.", slot: "wep" },
   stormcloak: { name: "Штормовой плащ", desc: "Тёмно-зелёный плащ, пропитанный маслом ламинарии.", slot: "cloak" },
   shellmail: { name: "Панцирная броня", desc: "Пластины раковин поверх кожи. Светится у воды.", slot: "arm" },
+  stormheart: { name: "Сердце шторма", desc: "Чёрная жемчужина из груди Солевого хранителя." },
+  tidehelm: { name: "Венец отлива", desc: "Базальт и жемчуг. Море теперь смотрит твоими глазами.", slot: "helm" },
 };
 
 export type Npc = {
@@ -201,6 +205,7 @@ export const NPCS: Npc[] = [
       SASH: "Кушак шьют из соли и чужой нитки. Укради с бочки на пирсе или сшей в кузнице. Без него ты овца.",
       SAIL: "Море берёт тех, кого суша выплюнула. Скажи — и не блюй.",
       STEAL: "Пальцы считаю. Кушак на бочке — не мой. Бери, если тень твоя.",
+      WARDEN: "Под приливным камнем есть пасть. Солевой хранитель помнит корабли, которых уже нет. Вернёшься с его сердцем — море признает тебя.",
     },
   },
 ];
@@ -267,7 +272,7 @@ export const GREET: Record<NpcId, Record<Guise, string>> = {
   },
 };
 
-export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab";
+export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab" | "brine";
 
 export const MOB: Record<
   MobKind,
@@ -278,6 +283,7 @@ export const MOB: Record<
   skel: { name: "Скелет", hp: 18, atk: 5, xp: 16, gold: 8, sprite: 1 },
   wraith: { name: "Призрак", hp: 28, atk: 7, xp: 40, gold: 30, sprite: 3 },
   crab: { name: "Панцирник", hp: 14, atk: 4, xp: 12, gold: 6, sprite: 0 },
+  brine: { name: "Солевой хранитель", hp: 180, atk: 12, xp: 120, gold: 80, sprite: 0 },
 };
 
 export const SHOP: { word: string; npc: NpcId; item: ItemId; gold: number }[] = [
@@ -319,6 +325,7 @@ export const ASK: Record<string, string> = {
   STEAL: "Украсть кушак с бочки",
   ROBE: "Купить робу (40 зол.)",
   CLOTH: "Купить полотно (12 зол.)",
+  WARDEN: "Что под приливным камнем?",
 };
 
 export const DROP: Record<MobKind, ItemId | null> = {
@@ -327,6 +334,7 @@ export const DROP: Record<MobKind, ItemId | null> = {
   skel: "cloth",
   wraith: null,
   crab: "shell",
+  brine: "stormheart",
 };
 
 export const KEY_RU: Record<string, string> = {
