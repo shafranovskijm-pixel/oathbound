@@ -1,0 +1,11 @@
+node_modules
+.vercel
+dist
+artifacts
+attachments
+.grok
+*.log
+/tmp
+.DS_Store
+screenshots/*.png
+!screenshots/.gitkeep
