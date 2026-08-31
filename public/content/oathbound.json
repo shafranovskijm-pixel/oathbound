@@ -83,9 +83,9 @@
       "c": 13,
       "r": 17,
       "options": [
-        { "id": "turfhouse", "name": "Дерновый дом", "cost": 28, "desc": "Камень, дерево и толстая зелёная крыша.", "bonus": "Отдых · +еда", "sprite": "shack", "frame": 0, "rest": true, "food": 16 },
-        { "id": "saltworks", "name": "Соляная мастерская", "cost": 32, "desc": "Верстак для гарпунов, плащей и панцирей.", "bonus": "Островной крафт · +полотно", "sprite": "keep", "frame": 1, "craft": true, "cloth": 2 },
-        { "id": "stormfire", "name": "Штормовой огонь", "cost": 36, "desc": "Сигнальная башня над туманом.", "bonus": "Камень пути · +золото", "sprite": "beacon", "frame": 0, "gold": 20, "waypoint": "isle" }
+        { "id": "turfhouse", "name": "Дерновый дом", "cost": 28, "desc": "Камень, дерево и толстая зелёная крыша.", "bonus": "Отдых · +еда · расход еды −45% на острове", "sprite": "shack", "frame": 0, "rest": true, "food": 16 },
+        { "id": "saltworks", "name": "Соляная мастерская", "cost": 32, "desc": "Верстак для гарпунов, плащей и панцирей.", "bonus": "Крафт −4 зол. · +1 ресурс с узла · +полотно", "sprite": "keep", "frame": 1, "craft": true, "cloth": 2 },
+        { "id": "stormfire", "name": "Штормовой огонь", "cost": 36, "desc": "Сигнальная башня над туманом.", "bonus": "+3 урона на острове · камень пути · +золото", "sprite": "beacon", "frame": 0, "gold": 20, "waypoint": "isle" }
       ]
     }
   ],

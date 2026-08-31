@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { ITEM, NPCS } from "../src/game/content.ts";
 import { blocked, MAPS, SPAWN } from "../src/game/world.ts";
 
 const source = JSON.parse(await readFile(new URL("../src/game/oathbound.json", import.meta.url), "utf8"));
@@ -72,4 +73,15 @@ test("tidal grotto has a safe entrance and a boss arena", () => {
   assert.equal(blocked("grotto", 11, 4), false);
   assert.equal(reachable("isle", SPAWN.isle, { c: 30, r: 7 }), true);
   assert.equal(reachable("grotto", SPAWN.grotto, { c: 11, r: 4 }), true);
+});
+
+test("living haven has a reachable quest giver and three helmet rewards", () => {
+  const eira = NPCS.find((npc) => npc.id === "eira");
+  assert.ok(eira);
+  assert.equal(eira.map, "isle");
+  assert.equal(reachable("isle", SPAWN.isle, eira), true);
+  for (const id of ["havenhood", "saltvisor", "firecrown"]) {
+    assert.equal(ITEM[id].slot, "helm");
+    assert.ok(ITEM[id].name.length > 4);
+  }
 });

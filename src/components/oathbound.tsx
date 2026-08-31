@@ -45,6 +45,7 @@ const IDLE: Snapshot = {
   helm: "без шлема",
   equipment: { wep: "sword", arm: "leather", cloak: null, helm: null },
   tide: null,
+  haven: null,
   guise: "oath",
   goldFlash: 0,
   activeSlot: 0,
@@ -93,6 +94,7 @@ const NPC_FACE: Record<string, string> = {
   edric: "/portraits/edric.png",
   bruna: "/portraits/bruna.png",
   ryn: "/portraits/ryn.png",
+  eira: "/portraits/mira.png",
   halric: "/portraits/halric.png",
   lyra: "/portraits/lyra.png",
   mira: "/portraits/mira.png",
@@ -356,6 +358,9 @@ export function Oathbound() {
                   <p className="font-mono text-[10px] tracking-widest text-muted">{snap.tide.label}</p>
                   <div className="stat-bar mt-1 h-1"><i className="bg-ok" style={{ width: `${Math.round(snap.tide.level * 100)}%` }} /></div>
                 </div>
+              ) : null}
+              {snap.tide && snap.haven ? (
+                <p className="mt-2 text-[10px] leading-normal text-subtle">{snap.haven.name}: {snap.haven.effect}</p>
               ) : null}
             </div>
           </aside>
