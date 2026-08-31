@@ -63,6 +63,7 @@ export type Snapshot = {
   helm: string;
   equipment: Record<Slot, ItemId | null>;
   tide: { label: string; level: number } | null;
+  haven: { name: string; effect: string } | null;
   guise: Guise;
   goldFlash: number;
   activeSlot: number;
@@ -136,7 +137,7 @@ const STACKABLE_ITEMS = new Set<ItemId>([
   "shell",
 ]);
 
-const AUTO_EQUIP_ITEMS = new Set<ItemId>(["steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail", "tidehelm"]);
+const AUTO_EQUIP_ITEMS = new Set<ItemId>(["steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail", "tidehelm", "havenhood", "saltvisor", "firecrown"]);
 
 type Mob = {
   id: number;
@@ -413,8 +414,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     else if (STACKABLE_ITEMS.has(id) || !has(id)) items.push(id);
     audio.pickup();
     const slot = ITEM[id].slot;
-    if (slot && (!worn[slot] || AUTO_EQUIP_ITEMS.has(id))) worn[slot] = id;
-    if (slot && AUTO_EQUIP_ITEMS.has(id)) say(`Надето: ${ITEM[id].name}.`);
+    const autoEquip = AUTO_EQUIP_ITEMS.has(id) && !(slot === "helm" && worn.helm === "tidehelm" && id !== "tidehelm");
+    if (slot && (!worn[slot] || autoEquip)) worn[slot] = id;
+    if (slot && autoEquip) say(`Надето: ${ITEM[id].name}.`);
     if (AUTO_EQUIP_ITEMS.has(id)) {
       burst(px, py, "#e8e4d8", 18);
       float(px, py - 20, ITEM[id].name, "#e8e4d8");
@@ -437,8 +439,42 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     emit(true);
   }
 
+  function havenChoice() {
+    return raised.get("haven") ?? null;
+  }
+
+  function islandMap() {
+    return map === "isle" || map === "grotto";
+  }
+
+  function islandCrabKills() {
+    return mobs.filter((mob) => mob.map === "isle" && mob.kind === "crab" && mob.hp <= 0).length;
+  }
+
+  function eiraReward(): ItemId {
+    return havenChoice() === "saltworks" ? "saltvisor" : havenChoice() === "stormfire" ? "firecrown" : "havenhood";
+  }
+
+  function recipeGold(r: (typeof CRAFT)[number]) {
+    return Math.max(0, r.gold - (havenChoice() === "saltworks" ? 4 : 0));
+  }
+
+  function havenStatus() {
+    const choice = havenChoice();
+    if (!choice) return null;
+    const option = SITES.find((site) => site.id === "haven")?.options.find((candidate) => candidate.id === choice);
+    if (!option) return null;
+    const effect =
+      choice === "turfhouse"
+        ? "Расход еды на острове −45%"
+        : choice === "saltworks"
+          ? "Крафт −4 зол. · +1 ресурс"
+          : "+3 урона на острове · маяк";
+    return { name: option.name, effect };
+  }
+
   function canMake(r: (typeof CRAFT)[number]) {
-    if (gold < r.gold) return false;
+    if (gold < recipeGold(r)) return false;
     const count: Partial<Record<ItemId, number>> = {};
     for (const n of r.need) count[n] = (count[n] ?? 0) + 1;
     for (const [k, n] of Object.entries(count)) {
@@ -469,7 +505,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
-    gold -= r.gold;
+    gold -= recipeGold(r);
     for (const n of r.need) {
       const i = items.indexOf(n);
       if (i >= 0) items.splice(i, 1);
@@ -487,6 +523,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function quests() {
+    const eiraKills = Math.min(4, islandCrabKills());
     return [
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
       { text: "Поднять Двор клятвы (юг от дороги)", done: flags.has("keep") },
@@ -501,6 +538,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Убить Солевого хранителя", done: has("stormheart") || has("tidehelm") },
       { text: "Поднять постройку на участке (роща, межа, кряж, топь, мыс)", done: raised.size > 0 },
       { text: "Основать убежище в бухте Соляного киля", done: raised.has("haven") },
+      {
+        text: flags.has("eiraQuest") ? `Очистить берег для Эйры (${eiraKills}/4)` : "Поговорить с Эйрой после основания гавани",
+        done: flags.has("eiraDone"),
+      },
       { text: "Сковать островное снаряжение", done: has("harpoon") || has("stormcloak") || has("shellmail") || has("tidehelm") },
     ];
   }
@@ -585,6 +626,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       helm: worn.helm ? ITEM[worn.helm].name : "без шлема",
       equipment: { ...worn },
       tide: map === "isle" || map === "grotto" ? tideState() : null,
+      haven: havenStatus(),
       guise: guise(),
       goldFlash,
       activeSlot,
@@ -592,7 +634,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       recipes: CRAFT.map((r) => ({
         out: r.out,
         name: ITEM[r.out].name,
-        gold: r.gold,
+        gold: recipeGold(r),
         need: r.need.map((n) => ITEM[n].name),
         ok: canMake(r),
       })),
@@ -923,12 +965,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return !solidAt(nx - r, ny) && !solidAt(nx + r, ny) && !solidAt(nx, ny - r * 0.4) && !solidAt(nx, ny + r);
   }
 
+  function npcVisible(n: Npc) {
+    if (n.id === "lyra" && lyra) return false;
+    if (n.id === "eira" && !raised.has("haven")) return false;
+    return true;
+  }
+
   function npcNear(dist = 40) {
     let best: Npc | null = null;
     let bd = dist;
     for (const n of NPCS) {
-      if (n.map !== map) continue;
-      if (n.id === "lyra" && lyra) continue;
+      if (n.map !== map || !npcVisible(n)) continue;
       const d = Math.hypot(n.c * TILE + 16 - px, n.r * TILE + 16 - py);
       if (d < bd) {
         bd = d;
@@ -953,6 +1000,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       talkText = "«Слышу стук даже через доски. Сердце хранителя. Соляная мастерская знает, какой венец из него выковать.»";
     } else if (n.id === "ryn" && has("tide")) {
       talkText = "«Камень. Вторая клятва у тебя в кармане. Суша этого не простит. Киль — простит всё.»";
+    }
+    if (n.id === "eira") {
+      const killed = islandCrabKills();
+      if (flags.has("eiraDone")) talkText = `«${ITEM[eiraReward()].name} тебе идёт. Теперь бухта знает своего хозяина.»`;
+      else if (flags.has("eiraQuest")) talkText = `«Панцирники: ${Math.min(4, killed)} из 4. Берег считает кровь точнее нас.»`;
+      else talkText = `«${havenStatus()?.name ?? "Крыша"} стоит. Теперь посмотрим, способен ли ты удержать бухту.»`;
     }
     mode = "talk";
     audio.talk();
@@ -1031,6 +1084,34 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
+    if (n.id === "eira" && key === "HAVEN") {
+      const status = havenStatus();
+      talkText = status ? `«${status.name}. ${status.effect}. Выбор уже меняет бухту.»` : "«Сначала поставь здесь хоть одну крышу.»";
+      audio.talk();
+      emit(true);
+      return;
+    }
+    if (n.id === "eira" && key === "WORK") {
+      const killed = islandCrabKills();
+      if (!flags.has("eiraQuest")) {
+        flags.add("eiraQuest");
+        talkText = "«Очисти берег от четырёх панцирников. Награда будет такой же, как гавань, которую ты выбрал.»";
+        say("Задание Эйры: убить 4 панцирников на острове.");
+      } else if (killed < 4) {
+        talkText = `«Ещё ${4 - killed}. Они прячутся у воды и в траве.»`;
+      } else if (!flags.has("eiraDone")) {
+        const reward = eiraReward();
+        flags.add("eiraDone");
+        give(reward);
+        talkText = `«Берег снова наш. ${ITEM[reward].name} — носи так, чтобы корабли видели издалека.»`;
+        say(`Эйра наградила: ${ITEM[reward].name}.`);
+        audio.ok();
+      } else {
+        talkText = "«Берег чист. Теперь гавани нужны не клинки, а люди.»";
+      }
+      emit(true);
+      return;
+    }
     if (n.id === "halric" && has("codex") && (key === "CODEX" || key === "OATH")) {
       flags.add("returned");
       audio.end();
@@ -1046,10 +1127,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function armor() {
-    return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + (worn.helm === "tidehelm" ? 2 : 0);
+    const helmArmor = worn.helm === "tidehelm" || worn.helm === "saltvisor" ? 2 : worn.helm === "havenhood" || worn.helm === "firecrown" ? 1 : 0;
+    return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + helmArmor;
   }
   function meleeDmg() {
     let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
+    if (islandMap() && havenChoice() === "stormfire") d += 3;
+    if (worn.helm === "firecrown") d += 2;
     if (markT > 0) {
       d *= 2;
       markT = 0;
@@ -1341,8 +1425,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const node = gatherNodeAt(map, tileC(), tileR());
     if (node && !opened.has(`node:${node.id}`)) {
       opened.add(`node:${node.id}`);
-      for (let i = 0; i < node.amount; i++) give(node.item);
-      say(`${node.label}. +${node.amount} · ${ITEM[node.item].name}.`);
+      const amount = node.amount + (havenChoice() === "saltworks" ? 1 : 0);
+      for (let i = 0; i < amount; i++) give(node.item);
+      say(`${node.label}. +${amount} · ${ITEM[node.item].name}.`);
       burst(node.c * TILE + 16, node.r * TILE + 16, "#d8d0a8", 12);
     } else if (map === "hall" && tileC() === 10 && tileR() === 3 && !opened.has(id)) {
       opened.add(id);
@@ -1843,7 +1928,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
     if (mag > 0.2) {
       footT += dt;
-      food -= dt * 0.28;
+      food -= dt * 0.28 * (islandMap() && havenChoice() === "turfhouse" ? 0.55 : 1);
       if (footT > 0.28) {
         footT = 0;
         audio.step();
@@ -2452,7 +2537,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
 
     for (const n of NPCS) {
-      if (n.map !== map || (n.id === "lyra" && lyra)) continue;
+      if (n.map !== map || !npcVisible(n)) continue;
       const s = wrld(n.c * TILE, n.r * TILE - 10);
       sheet(imgs.npcs, n.sprite, s.x, s.y, 36);
       const near = Math.hypot(n.c * TILE + 16 - px, n.r * TILE + 16 - py) < 52;
@@ -2660,6 +2745,54 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillStyle = "#d8f0e8";
       ctx.beginPath();
       ctx.arc(cx, cy - 19, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (worn.helm === "havenhood") {
+      ctx.fillStyle = "#29463b";
+      ctx.beginPath();
+      ctx.arc(cx, cy - 12, 12, Math.PI, Math.PI * 2);
+      ctx.lineTo(cx + 10, cy - 2);
+      ctx.lineTo(cx - 10, cy - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#9c8561";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 11, 8, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    } else if (worn.helm === "saltvisor") {
+      ctx.fillStyle = "#d7d1b9";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - 14, 12, 8, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#40585b";
+      ctx.fillRect(cx - 12, cy - 13, 24, 5);
+      ctx.fillStyle = "#9ec8c2";
+      ctx.fillRect(cx - 7, cy - 12, 3, 2);
+      ctx.fillRect(cx + 4, cy - 12, 3, 2);
+    } else if (worn.helm === "firecrown") {
+      const glow = 0.65 + Math.sin(time * 8) * 0.25;
+      ctx.globalAlpha = 0.18 * glow;
+      ctx.fillStyle = "#e07a4a";
+      ctx.beginPath();
+      ctx.arc(cx, cy - 16, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#a85d38";
+      ctx.beginPath();
+      ctx.moveTo(cx - 12, cy - 10);
+      ctx.lineTo(cx - 10, cy - 22);
+      ctx.lineTo(cx - 4, cy - 15);
+      ctx.lineTo(cx, cy - 25);
+      ctx.lineTo(cx + 4, cy - 15);
+      ctx.lineTo(cx + 10, cy - 22);
+      ctx.lineTo(cx + 12, cy - 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = "#f0c36f";
+      ctx.beginPath();
+      ctx.arc(cx, cy - 18, 3, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -2880,7 +3013,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     talkGo = null;
     interactGo = null;
     for (const n of NPCS) {
-      if (n.map !== map || (n.id === "lyra" && lyra)) continue;
+      if (n.map !== map || !npcVisible(n)) continue;
       if (Math.hypot(n.c * TILE + 16 - wx, n.r * TILE + 8 - wy) < 22) {
         talkGo = n;
         moveTo = { x: n.c * TILE + 16, y: n.r * TILE + 16 };

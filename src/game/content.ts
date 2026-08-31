@@ -27,9 +27,12 @@ export type ItemId =
   | "stormcloak"
   | "shellmail"
   | "stormheart"
-  | "tidehelm";
+  | "tidehelm"
+  | "havenhood"
+  | "saltvisor"
+  | "firecrown";
 
-export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn";
+export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn" | "eira";
 export type Slot = "wep" | "arm" | "cloak" | "helm";
 export type Guise = "oath" | "mage" | "thief" | "pirate";
 
@@ -61,6 +64,9 @@ export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> =
   shellmail: { name: "Панцирная броня", desc: "Пластины раковин поверх кожи. Светится у воды.", slot: "arm" },
   stormheart: { name: "Сердце шторма", desc: "Чёрная жемчужина из груди Солевого хранителя." },
   tidehelm: { name: "Венец отлива", desc: "Базальт и жемчуг. Море теперь смотрит твоими глазами.", slot: "helm" },
+  havenhood: { name: "Капюшон гавани", desc: "Плотная шерсть, пропитанная солью и дымом очага.", slot: "helm" },
+  saltvisor: { name: "Соляное забрало", desc: "Светлая пластина мастера. Не слепнет от морской пены.", slot: "helm" },
+  firecrown: { name: "Корона штормового огня", desc: "Медные зубцы удерживают искру маяка.", slot: "helm" },
 };
 
 export type Npc = {
@@ -208,6 +214,21 @@ export const NPCS: Npc[] = [
       WARDEN: "Под приливным камнем есть пасть. Солевой хранитель помнит корабли, которых уже нет. Вернёшься с его сердцем — море признает тебя.",
     },
   },
+  {
+    id: "eira",
+    name: "Эйра",
+    map: "isle",
+    c: 15,
+    r: 17,
+    sprite: 1,
+    words: {
+      NAME: "Эйра. Последняя из солеваров этой бухты. До тебя здесь строили только могилы.",
+      JOB: "Считаю приливы, чиню сети и слушаю, как камень предупреждает о штормах.",
+      HAVEN: "Дом кормит людей. Мастерская кормит ремесло. Огонь зовёт корабли — вместе с теми, кого лучше не звать.",
+      WORK: "Панцирники расплодились на берегу. Четырёх будет достаточно, чтобы остальные снова боялись света.",
+      WARDEN: "Хранитель старше нашей гавани. Не буди его без приливного камня и хорошей брони.",
+    },
+  },
 ];
 
 export const ROLE: Record<NpcId, string> = {
@@ -219,6 +240,7 @@ export const ROLE: Record<NpcId, string> = {
   mira: "у алтаря",
   oskar: "кузнец болот",
   ryn: "капитан Соляного киля",
+  eira: "последняя солеварка бухты",
 };
 
 export const GREET: Record<NpcId, Record<Guise, string>> = {
@@ -269,6 +291,12 @@ export const GREET: Record<NpcId, Record<Guise, string>> = {
     mage: "«Роба на палубе — парус сам по себе. Мне нужен кушак, не пепел. Прочь.»",
     thief: "«Тень. Пальцы вижу. Кушак на бочке — не мой. Срежь, если тень твоя. Потом — кровь.»",
     pirate: "«Киль берёт. Волки тебя помнят. Скажи — и не блюй. На острове камень. Вторая клятва.»",
+  },
+  eira: {
+    oath: "«Ты поднял здесь крышу. Значит, хотя бы один человек ещё спорит с морем.»",
+    mage: "«Пепел на плечах, соль под ногами. Посмотрим, что из этого окажется сильнее.»",
+    thief: "«Тень полезна в шторм. Только не кради у тех, у кого море уже забрало всё.»",
+    pirate: "«Кушак узнаю. Но бухта принадлежит не килю — тому, кто удержит её ночью.»",
   },
 };
 
@@ -326,6 +354,8 @@ export const ASK: Record<string, string> = {
   ROBE: "Купить робу (40 зол.)",
   CLOTH: "Купить полотно (12 зол.)",
   WARDEN: "Что под приливным камнем?",
+  HAVEN: "Что даст гавань?",
+  WORK: "Чем помочь?",
 };
 
 export const DROP: Record<MobKind, ItemId | null> = {
