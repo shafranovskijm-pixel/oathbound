@@ -35,11 +35,41 @@ test("island is a navigable region instead of a single room", () => {
   assert.equal(blocked("isle", SPAWN.isle.c, SPAWN.isle.r), false);
 });
 
+test("starter shoal teaches gathering, gold, gear and boat construction", () => {
+  assert.ok(MAPS.shoal.length >= 18);
+  assert.ok(MAPS.shoal[0].length >= 26);
+  const goals = [
+    { id: "wreck", c: 4, r: 14 },
+    { id: "bar", c: 19, r: 8 },
+    { id: "boat", c: 23, r: 13 },
+  ];
+  for (const goal of goals) {
+    assert.equal(blocked("shoal", goal.c, goal.r), false, `${goal.id} must stand on open ground`);
+    assert.equal(reachable("shoal", SPAWN.shoal, goal), true, `${goal.id} must be reachable`);
+  }
+  const nodes = source.gatherNodes.filter((node) => node.map === "shoal");
+  assert.ok(nodes.length >= 7);
+  for (const node of nodes) assert.equal(reachable("shoal", SPAWN.shoal, node), true, `${node.id} must be reachable`);
+  const amount = (item) => nodes.filter((node) => node.item === item).reduce((sum, node) => sum + node.amount, 0);
+  assert.ok(amount("wood") >= 4);
+  assert.ok(amount("cloth") >= 2);
+  assert.ok(amount("ore") >= 1);
+  assert.equal(ITEM.rags.slot, "arm");
+  assert.equal(ITEM.shiv.slot, "wep");
+  assert.ok(ITEM.mapshard.desc.includes("семичастной"));
+  const noll = NPCS.find((npc) => npc.id === "noll");
+  assert.ok(noll);
+  assert.equal(noll.map, "shoal");
+  assert.ok(noll.words.MAP.includes("Три золотых"));
+  assert.ok(noll.words.BOAT.includes("Четыре"));
+});
+
 test("island gathering nodes have stable ids and reachable positions", () => {
+  const islandNodes = source.gatherNodes.filter((node) => node.map === "isle");
   const ids = source.gatherNodes.map((node) => node.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.ok(ids.length >= 9);
-  for (const node of source.gatherNodes) {
+  assert.ok(islandNodes.length >= 9);
+  for (const node of islandNodes) {
     assert.equal(node.map, "isle");
     assert.equal(blocked(node.map, node.c, node.r), false, `${node.id} must be reachable`);
     assert.ok(node.amount > 0);
