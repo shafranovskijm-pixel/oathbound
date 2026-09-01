@@ -9,6 +9,9 @@ export type SiteOpt = {
   id: string;
   name: string;
   cost: number;
+  tier: 1 | 2 | 3;
+  energy: number;
+  need?: ItemId[];
   desc: string;
   bonus: string;
   sprite: SiteSprite;
@@ -32,6 +35,7 @@ export type Site = {
   id: SiteId;
   map: MapId;
   name: string;
+  stage: string;
   blurb: string;
   c: number;
   r: number;
