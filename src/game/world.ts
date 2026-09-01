@@ -1,5 +1,5 @@
 export const TILE = 32;
-export type MapId = "shoal" | "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle" | "grotto";
+export type MapId = "shoal" | "strait" | "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle" | "grotto";
 export type TileCh = string;
 
 function parse(raw: string): TileCh[][] {
@@ -120,6 +120,17 @@ function buildShoal(): TileCh[][] {
   for (let r = 6; r <= 13; r++) t[r][19] = "p";
   for (const [c, r] of [[4, 14], [6, 13], [9, 15], [12, 12], [15, 14], [19, 6], [20, 8], [23, 13]]) {
     t[r][c] = c <= 6 || c >= 23 ? "," : "p";
+  }
+  return t;
+}
+
+function buildStrait(): TileCh[][] {
+  const cols = 48;
+  const rows = 24;
+  const t: TileCh[][] = Array.from({ length: rows }, () => Array<TileCh>(cols).fill("~"));
+  // Reefs make the maiden voyage a route rather than a straight loading corridor.
+  for (const [c0, r0, length] of [[13, 4, 5], [20, 16, 6], [29, 6, 7], [38, 15, 4]] as const) {
+    for (let i = 0; i < length; i++) t[r0 + (i % 2)][c0 + i] = "M";
   }
   return t;
 }
@@ -300,6 +311,7 @@ function buildGrotto(): TileCh[][] {
 
 export const MAPS: Record<MapId, TileCh[][]> = {
   shoal: buildShoal(),
+  strait: buildStrait(),
   over: buildOver(),
   town: parse(TOWN),
   hall: parse(HALL),
@@ -314,6 +326,7 @@ export const MAPS: Record<MapId, TileCh[][]> = {
 
 export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
   shoal: { cols: MAPS.shoal[0].length, rows: MAPS.shoal.length },
+  strait: { cols: MAPS.strait[0].length, rows: MAPS.strait.length },
   over: { cols: MAPS.over[0].length, rows: MAPS.over.length },
   town: { cols: MAPS.town[0].length, rows: MAPS.town.length },
   hall: { cols: MAPS.hall[0].length, rows: MAPS.hall.length },
@@ -328,6 +341,7 @@ export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
 
 export const SPAWN: Record<MapId, { c: number; r: number }> = {
   shoal: { c: 6, r: 13 },
+  strait: { c: 2, r: 12 },
   over: { c: 14, r: 22 },
   town: { c: 9, r: 12 },
   hall: { c: 7, r: 6 },
@@ -342,6 +356,7 @@ export const SPAWN: Record<MapId, { c: number; r: number }> = {
 
 export const PLACE: Record<MapId, string> = {
   shoal: "Остров Трёх досок",
+  strait: "Пролив Семи осколков",
   over: "Дикие земли",
   town: "Вестмер",
   hall: "Зал Халрика",
@@ -356,6 +371,7 @@ export const PLACE: Record<MapId, string> = {
 
 export const EXITS: Record<MapId, { c: number; r: number; to: MapId; tc: number; tr: number }[]> = {
   shoal: [],
+  strait: [],
   over: [
     { c: 14, r: 18, to: "town", tc: 9, tr: 12 },
     { c: 13, r: 18, to: "town", tc: 9, tr: 12 },
