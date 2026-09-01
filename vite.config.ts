@@ -156,6 +156,11 @@ export default defineConfig(({ command, isPreview }) => ({
     port: 8081,
     strictPort: true,
   },
+  ssr: {
+    // The browser playtest runtime deploys only dist/, so keep server
+    // dependencies inside the bundle instead of resolving node_modules later.
+    noExternal: true,
+  },
   resolve: { tsconfigPaths: true },
   plugins: [
     pgliteBootstrapPlugin(),
@@ -166,8 +171,11 @@ export default defineConfig(({ command, isPreview }) => ({
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
-    ...(command === "build" || isPreview
+    tanstackStart({
+      server: { entry: "server/index" },
+      ...(process.env.VERCEL === "1" ? {} : { spa: { enabled: true, prerender: { outputPath: "/index" } } }),
+    }),
+    ...((command === "build" || isPreview) && process.env.VERCEL === "1"
       ? [
           nitro({
             preset: "vercel",
