@@ -140,6 +140,7 @@ const TIER_RU = { 1: "I · основа", 2: "II · хозяйство", 3: "III
 const SLOT_RU: Record<EquipmentSlot, string> = { wep: "Оружие", arm: "Броня", cloak: "Плащ", helm: "Шлем" };
 const HP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].hp));
 const MP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].mp));
+const SITE_VISUAL: Record<string, number> = { grove: 0, mill: 1, ridge: 2, marsh: 3, cape: 4, haven: 5 };
 
 function saveDate(value: number) {
   try {
@@ -147,6 +148,39 @@ function saveDate(value: number) {
   } catch {
     return "недавнее сохранение";
   }
+}
+
+function framePosition(frame: number, cols: number, rows: number) {
+  const col = frame % cols;
+  const row = Math.floor(frame / cols);
+  return `${cols > 1 ? (col / (cols - 1)) * 100 : 0}% ${rows > 1 ? (row / (rows - 1)) * 100 : 0}%`;
+}
+
+function SiteFoundationArt({ siteId, name }: { siteId: string; name: string }) {
+  const frame = SITE_VISUAL[siteId] ?? 0;
+  return (
+    <span
+      className="site-foundation-art"
+      style={{ backgroundImage: "url(/sprites/site-foundations.png)", backgroundPosition: framePosition(frame, 3, 2) }}
+      role="img"
+      aria-label={`Площадка: ${name}`}
+    />
+  );
+}
+
+function BuildingArt({ sprite, frame, name, large = false }: { sprite: string; frame: number; name: string; large?: boolean }) {
+  const sheet = sprite === "keep" || sprite.startsWith("site-buildings-");
+  return (
+    <span className={`building-art ${large ? "is-large" : ""}`} role="img" aria-label={name}>
+      <span
+        style={{
+          backgroundImage: `url(/sprites/${sprite}.png)`,
+          backgroundPosition: sheet ? framePosition(frame, 3, 2) : "center",
+          backgroundSize: sheet ? "300% 200%" : "contain",
+        }}
+      />
+    </span>
+  );
 }
 
 function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlot; size?: "sm" | "md" | "lg" }) {
@@ -380,13 +414,41 @@ function WorldAtlas({
     }
     for (const s of snap.sites) {
       if (s.map !== "over") continue;
-      ctx.fillStyle = s.built ? "#d8c070" : "rgba(232,228,216,0.55)";
-      ctx.fillRect(ox + s.c * scale - 3, oy + s.r * scale - 3, 6, 6);
+      const x = ox + s.c * scale;
+      const y = oy + s.r * scale;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.strokeStyle = s.built ? "#f0d58a" : "rgba(232,228,216,0.62)";
+      ctx.fillStyle = s.built ? "rgba(240,213,138,0.32)" : "rgba(10,12,16,0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-5, -1);
+      ctx.lineTo(0, -6);
+      ctx.lineTo(5, -1);
+      ctx.lineTo(5, 5);
+      ctx.lineTo(-5, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      if (s.built) {
+        ctx.fillStyle = "#f0d58a";
+        ctx.fillRect(-1, 1, 2, 4);
+      }
+      ctx.restore();
     }
     if (snap.you.map === "over") {
+      const x = ox + snap.you.c * scale;
+      const y = oy + snap.you.r * scale;
       ctx.fillStyle = "#e8e4d8";
+      ctx.strokeStyle = "rgba(10,12,16,0.82)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(ox + snap.you.c * scale, oy + snap.you.r * scale, 4, 0, Math.PI * 2);
+      ctx.moveTo(x, y - 6);
+      ctx.lineTo(x + 4, y);
+      ctx.lineTo(x, y + 6);
+      ctx.lineTo(x - 4, y);
+      ctx.closePath();
+      ctx.stroke();
       ctx.fill();
     }
   }, [snap.landmarks, snap.sites, snap.you]);
@@ -398,7 +460,7 @@ function WorldAtlas({
       <aside className="atlas-legend w-44 shrink-0 overflow-auto">
         <p className="font-mono text-xs tracking-widest text-muted">КАРТА</p>
         <h2 className="mt-1 font-display text-xl">Вестмер</h2>
-        <p className="mt-2 text-xs text-subtle">Белая точка — ты. Жёлтый квадрат — постройка.</p>
+            <p className="mt-2 text-xs text-subtle">Белый ромб — ты. Домик — участок, золотой свет означает готовую постройку.</p>
         <ul className="mt-4">
           {snap.waypoints.map((w) => (
             <li key={w.id}>
@@ -770,30 +832,40 @@ export function Oathbound() {
         {snap.mode === "site" ? (
           <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto overflow-auto hud-ink">
             <div className="overlay-card w-full max-w-4xl site-panel">
+              <button type="button" className="icon-close site-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
               {(() => {
                 const s = snap.sites.find((x) => x.id === snap.nearSite) ?? snap.sites[0];
                 if (!s) return <p>Нет участка.</p>;
+                const builtOption = s.options.find((option) => option.name === s.built);
                 return (
                   <>
-                    <header className="site-header">
-                      <div>
-                        <p className="font-mono text-xs tracking-widest text-muted">УЧАСТОК · {s.stage}</p>
-                        <h2 className="mt-1 font-display text-2xl font-semibold">{s.name}</h2>
+                    <section className="site-hero">
+                      {builtOption ? <BuildingArt sprite={builtOption.visualSheet} frame={builtOption.visualFrame} name={builtOption.name} large /> : <SiteFoundationArt siteId={s.id} name={s.name} />}
+                      <div className="site-hero-copy">
+                        <header className="site-header">
+                          <div>
+                            <p className="font-mono text-xs tracking-widest text-[#d9b879]">УЧАСТОК · {s.stage}</p>
+                            <h2 className="mt-1 font-display text-3xl font-semibold">{s.name}</h2>
+                          </div>
+                          <div className="site-purse" aria-label="Запасы для строительства">
+                            <span><Coins /> {snap.gold} зол.</span>
+                            <span><Zap /> {Math.floor(snap.food)} сил</span>
+                          </div>
+                        </header>
+                        <p className="site-lore">{s.blurb}</p>
                       </div>
-                      <div className="site-purse" aria-label="Запасы для строительства">
-                        <span><Coins /> {snap.gold} зол.</span>
-                        <span><Zap /> {Math.floor(snap.food)} сил</span>
-                      </div>
-                    </header>
-                    <p className="site-lore">{s.blurb}</p>
+                    </section>
                     {s.built ? (
-                      <div className="site-built"><Check /> Здесь уже стоит: <b>{s.built}</b></div>
+                      <div className="site-built"><Check /> Здесь уже стоит: <b>{s.built}</b><span>Постройка стала частью мира и видна на карте.</span></div>
                     ) : (
                       <ul className="site-options">
                         {s.options.map((o) => (
                           <li key={o.id} className={`site-choice ${o.ok ? "is-ready" : ""}`}>
-                            <div className="site-choice-copy">
+                            <div className="site-choice-visual">
+                              <BuildingArt sprite={o.visualSheet} frame={o.visualFrame} name={o.name} />
                               <span className="site-tier">{TIER_RU[o.tier]}</span>
+                            </div>
+                            <div className="site-choice-copy">
                               <p className="font-display text-lg font-semibold">{o.name}</p>
                               <p className="site-choice-lore">{o.desc}</p>
                               <p className="site-bonus"><Sparkles /> {o.bonus}</p>
@@ -863,7 +935,10 @@ export function Oathbound() {
                 <ul className="mt-5 grid gap-2 md:grid-cols-3">
                   {snap.buildings.map((b) => (
                     <li key={b.id} className={`build-card ${b.ok ? "is-ready" : ""}`}>
-                      <span className="site-tier">{TIER_RU[b.tier]}</span>
+                      <div className="build-card-visual">
+                        <BuildingArt sprite="keep" frame={b.sprite} name={b.name} />
+                        <span className="site-tier">{TIER_RU[b.tier]}</span>
+                      </div>
                       <p className="font-display text-lg font-semibold">{b.name}</p>
                       <p className="mt-1 text-xs leading-relaxed text-muted">{b.desc}</p>
                       <p className="site-bonus"><Sparkles /> {b.bonus}</p>

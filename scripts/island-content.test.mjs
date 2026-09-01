@@ -55,6 +55,23 @@ test("island settlement and its three build choices are valid", () => {
   assert.equal(new Set(haven.options.map((option) => option.id)).size, 3);
 });
 
+test("every construction plot is reachable and has three distinct choices", () => {
+  const ids = source.sites.map((site) => site.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(source.sites.length, 6);
+  for (const site of source.sites) {
+    assert.equal(blocked(site.map, site.c, site.r), false, `${site.id} plot must stand on open ground`);
+    assert.equal(reachable(site.map, SPAWN[site.map], site), true, `${site.id} plot must be reachable from its map entrance`);
+    assert.equal(site.options.length, 3, `${site.id} must offer exactly three readable choices`);
+    assert.equal(new Set(site.options.map((option) => option.id)).size, 3, `${site.id} choices must be unique`);
+    for (const option of site.options) {
+      assert.ok(option.name.length >= 4);
+      assert.ok(option.desc.length >= 40, `${site.id}/${option.id} needs environmental lore`);
+      assert.ok(option.cost > 0);
+    }
+  }
+});
+
 test("island equipment recipes are defined exactly once", () => {
   const outputs = source.craft.map((recipe) => recipe.out);
   assert.equal(new Set(outputs).size, outputs.length);

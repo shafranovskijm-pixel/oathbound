@@ -40,7 +40,9 @@ function buildOver(): TileCh[][] {
     let c = c0;
     let r = r0;
     while (c !== c1 || r !== r1) {
-      if (t[r] && t[r][c] && t[r][c] !== "~" && t[r][c] !== "M") t[r][c] = "p";
+      // Authored roads are guarantees, not decoration: they cut a narrow pass
+      // through mountain tiles so every landmark and construction plot remains reachable.
+      if (t[r] && t[r][c] && t[r][c] !== "~") t[r][c] = "p";
       if (c !== c1) c += Math.sign(c1 - c);
       else if (r !== r1) r += Math.sign(r1 - r);
     }

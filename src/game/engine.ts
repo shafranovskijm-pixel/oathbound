@@ -64,6 +64,7 @@ export type Snapshot = {
     requires: string[];
     desc: string;
     bonus: string;
+    sprite: number;
     built: boolean;
     ok: boolean;
   }[];
@@ -138,6 +139,10 @@ export type Snapshot = {
       need: CostPart[];
       desc: string;
       bonus: string;
+      sprite: string;
+      frame: number;
+      visualSheet: string;
+      visualFrame: number;
       ok: boolean;
     }[];
   }[];
@@ -211,6 +216,21 @@ const HEARTH_STORIES = [
   "В башне звенит приливный камень. Море далеко, но его дыхание уже поселилось в стенах.",
   "На рассвете у ворот находят связку сухих трав. Никто из дозорных не видел, кто её принёс.",
 ];
+
+const SITE_VISUAL: Record<SiteId, number> = {
+  grove: 0,
+  mill: 1,
+  ridge: 2,
+  marsh: 3,
+  cape: 4,
+  haven: 5,
+};
+
+function siteBuildingVisual(siteId: SiteId, optionIndex: number) {
+  const siteIndex = SITE_VISUAL[siteId];
+  const sheets = ["site-buildings-a", "site-buildings-b", "site-buildings-c"];
+  return { sheet: sheets[Math.floor(siteIndex / 2)], frame: (siteIndex % 2) * 3 + optionIndex };
+}
 
 type Mob = {
   id: number;
@@ -491,7 +511,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -969,6 +989,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         requires: (b.requires ?? []).filter((id) => !built.has(id)).map((id) => BUILDINGS.find((candidate) => candidate.id === id)?.name ?? id),
         desc: b.desc,
         bonus: b.bonus,
+        sprite: b.sprite,
         built: built.has(b.id),
         ok: !built.has(b.id) && (b.requires ?? []).every((id) => built.has(id)) && canAfford(b.cost, b.energy, b.need),
       })),
@@ -1071,17 +1092,24 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           c: s.c,
           r: s.r,
           built: opt?.name ?? "",
-          options: s.options.map((o) => ({
-            id: o.id,
-            name: o.name,
-            cost: o.cost,
-            tier: o.tier,
-            energy: o.energy,
-            need: itemNeeds(o.need),
-            desc: o.desc,
-            bonus: o.bonus,
-            ok: !pick && canAfford(o.cost, o.energy, o.need),
-          })),
+          options: s.options.map((o, optionIndex) => {
+            const visual = siteBuildingVisual(s.id, optionIndex);
+            return {
+              id: o.id,
+              name: o.name,
+              cost: o.cost,
+              tier: o.tier,
+              energy: o.energy,
+              need: itemNeeds(o.need),
+              desc: o.desc,
+              bonus: o.bonus,
+              sprite: o.sprite,
+              frame: o.frame,
+              visualSheet: visual.sheet,
+              visualFrame: visual.frame,
+              ok: !pick && canAfford(o.cost, o.energy, o.need),
+            };
+          }),
         };
       }),
       nearSite: siteAt(map, tileC(), tileR())?.id ?? null,
@@ -3159,25 +3187,134 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const p = wrld(x, y);
     const pulse = 0.55 + Math.sin(time * 5.5) * 0.2;
     const near = Math.hypot(x - px, y - py) < 132;
+    const radius = strong ? 19 : 15;
+    const corner = strong ? 7 : 5;
     ctx.save();
-    ctx.globalAlpha = pulse * (strong ? 0.95 : 0.72);
+    ctx.translate(p.x, p.y + 5 + Math.sin(time * 4.2) * 1.5);
+    ctx.rotate(Math.sin(time * 1.8) * 0.035);
+    ctx.globalAlpha = pulse * (strong ? 0.95 : 0.78);
     ctx.strokeStyle = strong ? "#f0d58a" : "#b9d8ca";
     ctx.lineWidth = strong ? 3 : 2;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y + 7, strong ? 20 : 15, strong ? 10 : 7, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha *= 0.18;
+    for (let i = 0; i < 4; i++) {
+      ctx.save();
+      ctx.rotate((Math.PI / 2) * i);
+      ctx.beginPath();
+      ctx.moveTo(-corner, -radius);
+      ctx.lineTo(-radius, -radius);
+      ctx.lineTo(-radius, -corner);
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.fillStyle = strong ? "#f0d58a" : "#b9d8ca";
-    ctx.fill();
+    ctx.globalAlpha *= 0.82;
+    ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-2, -2, 4, 4);
+    ctx.rotate(-Math.PI / 4);
     if (near && label) {
       ctx.globalAlpha = 0.94;
       ctx.fillStyle = "rgba(10,12,16,0.84)";
       ctx.font = "11px IBM Plex Mono, monospace";
       ctx.textAlign = "center";
       const width = ctx.measureText(label).width + 12;
-      ctx.fillRect(p.x - width / 2, p.y - 30, width, 17);
+      ctx.fillRect(-width / 2, -37, width, 17);
+      ctx.strokeStyle = strong ? "rgba(240,213,138,0.42)" : "rgba(185,216,202,0.35)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-width / 2, -37, width, 17);
       ctx.fillStyle = "#f0eadc";
-      ctx.fillText(label, p.x, p.y - 18);
+      ctx.fillText(label, 0, -25);
+    }
+    ctx.restore();
+  }
+
+  function drawWorldPrompt(x: number, y: number, label: string, strong = false) {
+    const p = wrld(x, y);
+    const near = Math.hypot(x - px, y - py) < 144;
+    const bob = Math.sin(time * 4.8) * 2;
+    ctx.save();
+    ctx.translate(p.x, p.y + bob);
+    ctx.strokeStyle = strong ? "#f0d58a" : "#9ed8d0";
+    ctx.fillStyle = strong ? "rgba(240,213,138,0.13)" : "rgba(158,216,208,0.1)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -13);
+    ctx.lineTo(7, -6);
+    ctx.lineTo(0, 1);
+    ctx.lineTo(-7, -6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-13, 8);
+    ctx.lineTo(-13, 2);
+    ctx.lineTo(-7, 2);
+    ctx.moveTo(13, 8);
+    ctx.lineTo(13, 2);
+    ctx.lineTo(7, 2);
+    ctx.stroke();
+    if (near) {
+      ctx.font = "11px IBM Plex Mono, monospace";
+      ctx.textAlign = "center";
+      const width = ctx.measureText(label).width + 16;
+      ctx.fillStyle = "rgba(10,12,16,0.9)";
+      ctx.fillRect(-width / 2, -38, width, 18);
+      ctx.strokeStyle = strong ? "rgba(240,213,138,0.48)" : "rgba(158,216,208,0.4)";
+      ctx.strokeRect(-width / 2, -38, width, 18);
+      ctx.fillStyle = "#f0eadc";
+      ctx.fillText(label, 0, -25);
+    }
+    ctx.restore();
+  }
+
+  function drawAmbientLife() {
+    ctx.save();
+    if (map === "over") {
+      const leaves = [[9, 21], [12, 23], [21, 37], [42, 9], [51, 35], [63, 19]];
+      for (let i = 0; i < leaves.length; i++) {
+        const [c, r] = leaves[i];
+        const drift = ((time * (8 + i) + i * 19) % 34) - 17;
+        const p = wrld(c * TILE + 16 + drift, r * TILE + 10 + Math.sin(time * 2 + i) * 7);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(time * 1.4 + i);
+        ctx.fillStyle = i % 2 ? "rgba(187,119,58,0.65)" : "rgba(207,164,76,0.6)";
+        ctx.fillRect(-2, -1, 5, 3);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+    }
+    if (map === "town" || (map === "keep" && built.has("hearth"))) {
+      const source = map === "town" ? [15 * TILE + 16, 5 * TILE] : [3 * TILE + 16, 3 * TILE + 4];
+      for (let i = 0; i < 4; i++) {
+        const rise = (time * (8 + i * 1.2) + i * 21) % 44;
+        const p = wrld(source[0] + Math.sin(time * 1.3 + i) * 5, source[1] - rise);
+        ctx.globalAlpha = 0.15 * (1 - rise / 48);
+        ctx.fillStyle = "#d8d1c2";
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, 5 + i, 3 + i * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    if (map === "isle") {
+      for (let i = 0; i < 3; i++) {
+        const x = ((time * (18 + i * 4) + i * 260) % (cssW + 120)) - 60;
+        const y = 55 + i * 42 + Math.sin(time + i) * 12;
+        ctx.globalAlpha = 0.22;
+        ctx.strokeStyle = "#dce8e2";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x - 7, y + 3);
+        ctx.quadraticCurveTo(x - 3, y - 2, x, y + 2);
+        ctx.quadraticCurveTo(x + 3, y - 2, x + 7, y + 3);
+        ctx.stroke();
+      }
+    }
+    if (map === "crypt" || map === "grotto") {
+      const color = map === "grotto" ? "#77d7cc" : "#9f88c7";
+      for (let i = 0; i < 9; i++) {
+        const x = (i * 137 + time * (5 + (i % 3))) % (cssW + 40) - 20;
+        const y = 50 + ((i * 83) % Math.max(80, cssH - 100)) + Math.sin(time * 2 + i) * 6;
+        ctx.globalAlpha = 0.16 + (i % 3) * 0.06;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, 2, 2);
+      }
     }
     ctx.restore();
   }
@@ -3211,11 +3348,21 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     for (const site of SITES) {
       if (site.map !== map) continue;
+      const sx = x0 + ((site.c + 0.5) / size.cols) * mw;
+      const sy = y0 + ((site.r + 0.5) / size.rows) * mh;
       ctx.fillStyle = raised.has(site.id) ? "#d8c070" : "#f0d58a";
-      ctx.fillRect(x0 + ((site.c + 0.5) / size.cols) * mw - 2, y0 + ((site.r + 0.5) / size.rows) * mh - 2, 4, 4);
+      ctx.fillRect(sx - 3, sy - 1, 7, 4);
+      ctx.fillRect(sx - 2, sy - 3, 5, 2);
+      ctx.fillRect(sx, sy + 1, 1, 2);
     }
     ctx.fillStyle = "#e8e4d8";
-    ctx.fillRect(x0 + (px / (size.cols * TILE)) * mw - 1, y0 + (py / (size.rows * TILE)) * mh - 1, 3, 3);
+    const heroX = x0 + (px / (size.cols * TILE)) * mw;
+    const heroY = y0 + (py / (size.rows * TILE)) * mh;
+    ctx.save();
+    ctx.translate(heroX, heroY);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-2, -2, 4, 4);
+    ctx.restore();
   }
 
   function render() {
@@ -3285,6 +3432,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillStyle = "rgba(20,68,72,0.12)";
       ctx.fillRect(0, 0, cssW, cssH);
     }
+    drawAmbientLife();
 
     if ((map === "hall" && !opened.has("hall:10,3")) || (map === "inn" && !opened.has("inn:3,4")) || (map === "dungeon" && !opened.has("dungeon:3,3"))) {
       const chests = map === "hall" ? [[10, 3]] : map === "inn" ? [[3, 4]] : [[3, 3]];
@@ -3323,22 +3471,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     for (const s of SITES) {
       if (s.map !== map) continue;
-      const p = wrld(s.c * TILE - 8, s.r * TILE - 18);
+      const p = wrld(s.c * TILE - 24, s.r * TILE - 44);
       const pick = raised.get(s.id);
       const opt = s.options.find((o) => o.id === pick);
       if (!opt) {
-        ctx.fillStyle = "rgba(20,16,12,0.55)";
-        ctx.beginPath();
-        ctx.ellipse(p.x + 24, p.y + 40, 18, 10, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(240,213,138,0.72)";
-        ctx.fillRect(p.x + 10, p.y + 22, 28, 8);
-        drawInteractionPulse(s.c * TILE + 16, s.r * TILE + 16, `Строить: ${s.name}`, true);
+        sheetGrid(imgs["site-foundations"], SITE_VISUAL[s.id], 3, 2, p.x, p.y, 80);
+        drawWorldPrompt(s.c * TILE + 16, s.r * TILE + 2, `Строить · ${s.name}`, true);
         continue;
       }
-      if (opt.sprite === "keep" && imgs.keep) sheetGrid(imgs.keep, opt.frame, 3, 2, p.x, p.y, 48);
-      else if (imgs[opt.sprite]) blit(imgs[opt.sprite], p.x, p.y, 46, 40);
-      else sheet(imgs.props, 1, p.x, p.y, 40);
+      const optionIndex = Math.max(0, s.options.indexOf(opt));
+      const visual = siteBuildingVisual(s.id, optionIndex);
+      sheetGrid(imgs[visual.sheet], visual.frame, 3, 2, p.x - 1, p.y + 3, 80);
       if (s.id === "haven" && flags.has("havenBroken")) {
         ctx.save();
         ctx.globalAlpha = 0.38;
@@ -3357,16 +3500,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.stroke();
         ctx.restore();
       }
-      if (opt.craft || opt.rest) drawInteractionPulse(s.c * TILE + 16, s.r * TILE + 16, opt.craft ? "Мастерская" : "Отдохнуть");
+      if (opt.craft || opt.rest) drawWorldPrompt(s.c * TILE + 16, s.r * TILE + 2, opt.craft ? "Мастерская" : "Отдохнуть");
     }
     if (map === "keep") {
       for (const b of BUILDINGS) {
         const s = wrld(b.c * TILE - 8, b.r * TILE - 18);
         if (!built.has(b.id)) {
-          ctx.fillStyle = "rgba(20,16,12,0.55)";
-          ctx.beginPath();
-          ctx.ellipse(s.x + 24, s.y + 40, 14, 8, 0, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.save();
+          ctx.globalAlpha = 0.2 + Math.sin(time * 2.4 + b.sprite) * 0.035;
+          ctx.filter = "grayscale(1) sepia(0.6) brightness(1.25)";
+          sheetGrid(imgs.keep, b.sprite, 3, 2, s.x, s.y, 48);
+          ctx.restore();
+          if (Math.hypot(b.c * TILE + 16 - px, b.r * TILE + 16 - py) < 88) drawWorldPrompt(b.c * TILE + 16, b.r * TILE + 4, `Место · ${b.name}`);
           continue;
         }
         sheetGrid(imgs.keep, b.sprite, 3, 2, s.x, s.y, 48);
@@ -3398,18 +3543,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (const w of WAYPOINTS) {
       if (w.map !== map || w.id === "keep") continue;
       const s = wrld(w.c * TILE + 16, w.r * TILE + 16);
-      ctx.save();
       const on = stones.has(w.id);
-      ctx.globalAlpha = on ? 0.55 + Math.sin(time * 5) * 0.25 : 0.28;
-      ctx.strokeStyle = on ? "#e8e4d8" : "#6e675c";
-      ctx.fillStyle = on ? "rgba(200,210,200,0.18)" : "transparent";
-      ctx.lineWidth = on ? 3 : 2;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, on ? 9 : 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      if (!on) drawInteractionPulse(w.c * TILE + 16, w.r * TILE + 16, `Камень пути: ${w.name}`);
+      sheetGrid(imgs.waystones, on ? 1 : 0, 2, 1, s.x - 28, s.y - 43, 56);
+      if (on) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = 0.12 + Math.sin(time * 5) * 0.05;
+        ctx.fillStyle = "#9ec4e8";
+        ctx.fillRect(s.x - 16, s.y - 28, 32, 32);
+        ctx.restore();
+      } else drawWorldPrompt(w.c * TILE + 16, w.r * TILE + 3, `Пробудить · ${w.name}`);
     }
 
     for (const n of NPCS) {
