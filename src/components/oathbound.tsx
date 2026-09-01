@@ -1,11 +1,25 @@
 import {
+  Check,
+  Coins,
+  Crown,
+  FlaskConical,
+  Hammer,
+  Leaf,
   Menu,
+  Package,
   ScrollText,
+  Shield,
+  Shirt,
+  Sparkles,
+  Sword,
+  TreePine,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import type { ItemId, Slot as EquipmentSlot } from "@/game/content";
 import { mountGame, type GameHandle, type Snapshot } from "@/game/engine";
 import { HERO_LIST, HEROES, SPELLS, type SpellId } from "@/game/heroes";
 import { MAPS } from "@/game/world";
@@ -104,8 +118,39 @@ const NPC_FACE: Record<string, string> = {
 };
 
 const GUISE_RU = { oath: "клятва", mage: "маг", thief: "вор", pirate: "киль" } as const;
+const SLOT_RU: Record<EquipmentSlot, string> = { wep: "Оружие", arm: "Броня", cloak: "Плащ", helm: "Шлем" };
 const HP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].hp));
 const MP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].mp));
+
+function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlot; size?: "sm" | "md" | "lg" }) {
+  const Icon = slot === "wep"
+    ? Sword
+    : slot === "arm"
+      ? Shield
+      : slot === "cloak"
+        ? Shirt
+        : slot === "helm"
+          ? Crown
+          : id === "potion"
+            ? FlaskConical
+            : id === "wood" || id === "driftwood"
+              ? TreePine
+              : id === "herb" || id === "kelp"
+                ? Leaf
+                : Package;
+  const tone = slot
+    ? "is-gear"
+    : id === "stormheart" || id === "tide" || id === "codex" || id === "mark"
+      ? "is-relic"
+      : id === "potion" || id === "food"
+        ? "is-consumable"
+        : "is-material";
+  return (
+    <span className={`item-glyph ${tone} is-${size}`} aria-hidden>
+      <Icon />
+    </span>
+  );
+}
 
 function Stick({ onChange }: { onChange: (x: number, y: number) => void }) {
   const root = useRef<HTMLDivElement>(null);
@@ -328,32 +373,41 @@ export function Oathbound() {
   const xpPct = snap.xpNeed ? Math.min(100, (snap.xp / snap.xpNeed) * 100) : 0;
   const hero = snap.hero ? HEROES[snap.hero] : null;
   const open = snap.mode === "play" || snap.mode === "way" || snap.mode === "build" || snap.mode === "site";
+  const equippedSlots = (["wep", "arm", "cloak", "helm"] as EquipmentSlot[]).map((slot) => ({
+    slot,
+    item: snap.items.find((item) => item.id === snap.equipment[slot]),
+  }));
+  const equipmentItems = snap.items.filter((item) => item.slot);
+  const inventoryItems = snap.items.filter((item) => !item.slot);
+  const latestEvent = snap.log.at(-1);
 
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-bg text-fg">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" aria-label="Oathbound" />
       <div className="absolute inset-0 pointer-events-none">
         {playing && hero ? (
-          <aside className="absolute top-3 left-3 flex gap-3 pointer-events-none hud-ink">
+          <aside className="hero-status-card absolute top-3 left-3 flex gap-3 pointer-events-none">
             <img
               src={`/portraits/${hero.id}.png`}
               alt={hero.name}
               width={72}
               height={96}
-              className="h-24 w-16 rounded-md object-cover object-top border border-border-strong pointer-events-none"
+              className="h-20 w-14 rounded-md object-cover object-top border border-border-strong pointer-events-none"
             />
-            <div className="w-44">
-              <p className="font-mono text-xs tracking-widest text-muted">{hero.title}</p>
-              <p className="text-sm font-medium">{hero.name}</p>
-              <p className="text-xs text-subtle mt-0.5">{snap.place}</p>
+            <div className="w-40">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold leading-none">{hero.name}</p>
+                  <p className="mt-1 text-[10px] text-muted">{snap.place}</p>
+                </div>
+                <span className="status-badge">{GUISE_RU[snap.guise]}</span>
+              </div>
               <div className="stat-bar mt-2"><i className="bg-danger" style={{ width: `${hpPct}%` }} /></div>
               <div className="stat-bar mt-1"><i className="bg-ok" style={{ width: `${mpPct}%` }} /></div>
               <div className="stat-bar mt-1 h-1"><i className="bg-accent" style={{ width: `${xpPct}%` }} /></div>
-              <p className="mt-2 font-mono text-xs tabular-nums text-muted">
-                {Math.ceil(snap.hp)}/{snap.maxHp} · {Math.floor(snap.mp)}/{snap.maxMp} · ур. {snap.level}
+              <p className="mt-1.5 font-mono text-[10px] tabular-nums text-muted">
+                HP {Math.ceil(snap.hp)}/{snap.maxHp} · MP {Math.floor(snap.mp)}/{snap.maxMp} · УР {snap.level}
               </p>
-              <p className="mt-1 text-xs text-subtle">{snap.wep} · {snap.arm} · {snap.cloak} · {snap.helm}</p>
-              <p className="mt-1 font-mono text-xs text-muted">{GUISE_RU[snap.guise]}</p>
               {snap.tide ? (
                 <div className="mt-2">
                   <p className="font-mono text-[10px] tracking-widest text-muted">{snap.tide.label}</p>
@@ -443,11 +497,15 @@ export function Oathbound() {
         ) : null}
 
         {playing && snap.mode === "play" ? (
-          <div className="absolute left-3 top-36 max-w-sm hud-ink">
-            <ul className="font-mono text-xs text-muted space-y-1">
-              {snap.log.slice(-2).map((l, i) => <li key={`${i}-${l}`}>{l}</li>)}
-            </ul>
-            <p className="mt-1 text-xs text-subtle">{snap.hint}</p>
+          <div className="world-guidance absolute left-3 top-36 w-[min(22rem,calc(100vw-1.5rem))]">
+            <p className="font-mono text-[10px] tracking-[0.2em] text-accent">СЕЙЧАС</p>
+            <p className="mt-1 text-sm font-medium leading-snug text-fg">{snap.hint}</p>
+            {latestEvent ? (
+              <div className="event-line mt-2">
+                <Sparkles className="size-3.5 shrink-0" />
+                <span>{latestEvent}</span>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -621,14 +679,20 @@ export function Oathbound() {
         ) : null}
 
         {snap.mode === "build" ? (
-          <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto overflow-auto hud-ink">
-            <div className="overlay-card w-full max-w-lg">
-              <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : "МАСТЕРСКАЯ"}</p>
-              <h2 className="mt-1 font-display text-xl font-semibold">{snap.inKeep ? "Стройка" : "Ремесло"}</h2>
+          <div className="absolute inset-0 flex items-center justify-center p-3 md:p-5 pointer-events-auto overflow-auto hud-ink">
+            <div className={`overlay-card w-full ${snap.canCraft ? "max-w-5xl" : "max-w-2xl"}`}>
+              <header className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : "ОСТРОВНАЯ МАСТЕРСКАЯ"}</p>
+                  <h2 className="mt-1 font-display text-2xl font-semibold">{snap.inKeep ? "Стройка и ремесло" : "Создать предмет"}</h2>
+                  <p className="mt-1 text-sm text-muted">Готовые рецепты стоят первыми. Нажми один раз — предмет сразу появится в сумке.</p>
+                </div>
+                <button type="button" className="icon-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
+              </header>
               {snap.inKeep ? (
-                <ul className="mt-4">
+                <ul className="mt-5 grid gap-2 md:grid-cols-3">
                   {snap.buildings.map((b) => (
-                    <li key={b.id} className="choice flex items-center justify-between gap-3">
+                    <li key={b.id} className="build-card flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium">{b.name}</p>
                         <p className="text-xs text-muted mt-1">{b.desc}</p>
@@ -644,22 +708,41 @@ export function Oathbound() {
               ) : null}
               {snap.canRest ? <Button className="mt-4" variant="ghost" onClick={() => g.current?.rest()}>Отдых у очага</Button> : null}
               {snap.canCraft ? (
-                <div className="mt-5">
-                  <p className="font-mono text-xs tracking-widest text-muted">КУЗНИЦА</p>
-                  <ul className="mt-2">
-                    {snap.recipes.map((r) => (
-                      <li key={r.out} className="choice flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium">{r.name}</p>
-                          <p className="text-xs text-muted mt-1">{r.need.join(" + ")} · {r.gold} зол.</p>
+                <div className="mt-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-mono text-xs tracking-widest text-muted">РЕЦЕПТЫ</p>
+                    <span className="flex items-center gap-1.5 font-mono text-xs text-accent"><Coins className="size-4" />{snap.gold}</span>
+                  </div>
+                  <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {[...snap.recipes].sort((a, b) => Number(b.ok) - Number(a.ok)).map((r) => (
+                      <li key={r.out} className={`recipe-card ${r.ok ? "is-ready" : ""}`}>
+                        <div className="flex items-start gap-3">
+                          <ItemGlyph id={r.out} slot={r.slot} size="lg" />
+                          <div className="min-w-0">
+                            <p className="font-display text-lg font-semibold leading-tight">{r.name}</p>
+                            <p className="mt-1 text-xs leading-snug text-muted">{r.desc}</p>
+                          </div>
+                          {r.ok ? <span className="ready-mark" title="Можно создать"><Check /></span> : null}
                         </div>
-                        <Button size="sm" variant="ghost" disabled={!r.ok} onClick={() => g.current?.craft(r.out)}>Ковать</Button>
+                        <div className="mt-4 flex flex-wrap gap-1.5">
+                          {r.need.map((part) => (
+                            <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
+                              <ItemGlyph id={part.id} size="sm" />
+                              {part.name} <b>{part.have}/{part.need}</b>
+                            </span>
+                          ))}
+                          <span className={`ingredient-chip ${snap.gold >= r.gold ? "is-enough" : "is-missing"}`}>
+                            <Coins className="size-3.5" /> золото <b>{snap.gold}/{r.gold}</b>
+                          </span>
+                        </div>
+                        <Button className="mt-4 w-full" size="sm" disabled={!r.ok} onClick={() => g.current?.craft(r.out)}>
+                          <Hammer className="size-4" /> {r.ok ? "Создать" : "Не хватает ресурсов"}
+                        </Button>
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : null}
-              <Button className="mt-2" variant="ghost" onClick={() => g.current?.closePanel()}>Закрыть</Button>
             </div>
           </div>
         ) : null}
@@ -682,30 +765,80 @@ export function Oathbound() {
         ) : null}
 
         {snap.mode === "inv" ? (
-          <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto hud-ink">
-            <div className="overlay-card w-full max-w-sm max-h-[80vh] overflow-auto">
-              <h2 className="font-display text-xl font-semibold flex items-center gap-2">
-                <HudIco id="bag" />
-                Сумка
-              </h2>
-              <ul className="mt-4">
-                {snap.items.map((it) => (
-                  <li key={it.id}>
-                    <button
-                      type="button"
-                      className="choice"
-                      onClick={() => { if (it.slot) g.current?.equip(it.id); }}
-                    >
-                      <p className="text-sm font-medium">{it.name}{it.count > 1 ? ` ×${it.count}` : ""}{it.on ? " · на тебе" : it.slot ? " · надеть" : ""}</p>
-                      <p className="text-xs text-muted mt-1">{it.desc}</p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-4 flex gap-2">
-                <Button size="sm" variant="ghost" onClick={() => g.current?.usePotion()}>Пить зелье</Button>
-                <Button variant="ghost" size="sm" onClick={() => g.current?.closePanel()}>Закрыть</Button>
-              </div>
+          <div className="absolute inset-0 flex items-center justify-center p-3 md:p-5 pointer-events-auto hud-ink">
+            <div className="overlay-card inventory-shell w-full max-w-5xl">
+              <header className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-xs tracking-widest text-muted">СНАРЯЖЕНИЕ И ДОБЫЧА</p>
+                  <h2 className="mt-1 font-display text-2xl font-semibold">Сумка</h2>
+                  <p className="mt-1 text-sm text-muted">Найденная экипировка меняет внешний вид героя. Выбери вещь и нажми «Надеть».</p>
+                </div>
+                <button type="button" className="icon-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
+              </header>
+
+              <section className="mt-5">
+                <p className="font-mono text-[10px] tracking-[0.2em] text-muted">НАДЕТО СЕЙЧАС</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+                  {equippedSlots.map(({ slot, item }) => (
+                    <div key={slot} className={`equipment-slot ${item ? "is-filled" : ""}`}>
+                      <ItemGlyph id={item?.id} slot={slot} />
+                      <div className="min-w-0">
+                        <p className="font-mono text-[10px] uppercase tracking-wider text-muted">{SLOT_RU[slot]}</p>
+                        <p className="mt-0.5 truncate text-sm font-medium">{item?.name ?? "Пусто"}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {equipmentItems.length ? (
+                <section className="mt-6">
+                  <p className="font-mono text-[10px] tracking-[0.2em] text-muted">ЭКИПИРОВКА</p>
+                  <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {equipmentItems.map((item) => (
+                      <li key={item.id} className={`item-card ${item.on ? "is-equipped" : ""}`}>
+                        <ItemGlyph id={item.id} slot={item.slot} size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold">{item.name}</p>
+                              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">{item.slot ? SLOT_RU[item.slot] : "Предмет"}</p>
+                            </div>
+                            {item.on ? <span className="equipped-badge"><Check /> Надето</span> : null}
+                          </div>
+                          <p className="mt-2 text-xs leading-snug text-muted">{item.desc}</p>
+                          {!item.on ? (
+                            <Button className="mt-3 w-full" size="sm" variant="ghost" onClick={() => g.current?.equip(item.id)}>Надеть</Button>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              <section className="mt-6">
+                <p className="font-mono text-[10px] tracking-[0.2em] text-muted">МАТЕРИАЛЫ И ВАЖНЫЕ ПРЕДМЕТЫ</p>
+                {inventoryItems.length ? (
+                  <ul className="mt-2 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+                    {inventoryItems.map((item) => (
+                      <li key={item.id} className="supply-card">
+                        <ItemGlyph id={item.id} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium leading-tight">{item.name}</p>
+                            {item.count > 1 ? <span className="item-count">×{item.count}</span> : null}
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted">{item.desc}</p>
+                          {item.id === "potion" ? (
+                            <Button className="mt-2 w-full" size="sm" variant="ghost" onClick={() => g.current?.usePotion()}>Использовать</Button>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="mt-2 text-sm text-muted">Пока пусто. Ресурсы и трофеи светятся на земле — просто кликни по ним.</p>}
+              </section>
             </div>
           </div>
         ) : null}
