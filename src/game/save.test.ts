@@ -39,6 +39,7 @@ const BASE: GameSave = {
   log: ["Начало"],
   activeSlot: 0,
   mobs: [],
+  groundItems: [{ id: 1, map: "over", x: 480, y: 720, item: "hide" }],
   cds: { smite: 0 },
 };
 
@@ -60,6 +61,7 @@ test("corrupt and incompatible saves fail closed", () => {
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, hp: "many" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, map: "nowhere" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, raid: { active: true, wave: "two" } })), null);
+  assert.equal(decodeGameSave(JSON.stringify({ ...BASE, groundItems: [{ id: 1, map: "void", x: 0, y: 0, item: "hide" }] })), null);
 });
 
 test("legacy saves without the helmet slot still load", () => {
@@ -74,4 +76,11 @@ test("saves from before haven raids still load", () => {
   const decoded = decodeGameSave(JSON.stringify(legacy));
   assert.ok(decoded);
   assert.equal(decoded.raid, undefined);
+});
+
+test("saves from before ground loot still load", () => {
+  const { groundItems: _groundItems, ...legacy } = BASE;
+  const decoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(decoded);
+  assert.equal(decoded.groundItems, undefined);
 });

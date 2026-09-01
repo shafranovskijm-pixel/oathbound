@@ -41,7 +41,7 @@ export type Snapshot = {
   log: string[];
   hint: string;
   talk: { name: string; text: string; portrait: string; role: string; ask: string; keys: { id: string; label: string }[] } | null;
-  items: { id: ItemId; name: string; desc: string; count: number; slot?: string; on?: boolean }[];
+  items: { id: ItemId; name: string; desc: string; count: number; slot?: Slot; on?: boolean }[];
   party: string[];
   quests: { text: string; done: boolean }[];
   spells: { id: SpellId; name: string; key: string; cost: number; ready: number }[];
@@ -69,7 +69,15 @@ export type Snapshot = {
   goldFlash: number;
   activeSlot: number;
   canCraft: boolean;
-  recipes: { out: ItemId; name: string; gold: number; need: string[]; ok: boolean }[];
+  recipes: {
+    out: ItemId;
+    name: string;
+    desc: string;
+    slot?: Slot;
+    gold: number;
+    need: { id: ItemId; name: string; have: number; need: number; ok: boolean }[];
+    ok: boolean;
+  }[];
   you: { c: number; r: number; map: MapId };
   sites: {
     id: SiteId;
@@ -179,6 +187,7 @@ type Slash = { x: number; y: number; ang: number; t: number; r: number; color: s
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
 type Floater = { x: number; y: number; text: string; life: number; color: string };
 type Coin = { map: MapId; x: number; y: number; z: number; vx: number; vy: number; vz: number; n: number; wait: number; spin: number };
+type GroundItem = { id: number; map: MapId; x: number; y: number; z: number; vz: number; wait: number; item: ItemId };
 
 function loadImg(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -291,12 +300,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   const shots: Shot[] = [];
   const slashes: Slash[] = [];
   const coins: Coin[] = [];
+  const groundItems: GroundItem[] = [];
   let goldFlash = 0;
   let activeSlot = 0;
   let moveTo: { x: number; y: number } | null = null;
   let huntId = 0;
   let talkGo: Npc | null = null;
-  let interactGo: { c: number; r: number } | null = null;
+  let interactGo: { x: number; y: number } | null = null;
   let holdLmb = false;
   let holdRmb = false;
   let aimX = 0;
@@ -305,6 +315,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let aimAng = 0;
   const cam = { x: px, y: py };
   let mobId = 1;
+  let groundItemId = 1;
   let mobs: Mob[] = [];
   let saveAvailable = readGameSave() !== null;
   let lastSavedAt = 0;
@@ -410,6 +421,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
   function has(id: ItemId) {
     return items.includes(id);
+  }
+  function itemCount(id: ItemId) {
+    return items.filter((candidate) => candidate === id).length;
+  }
+  function recipeNeeds(r: (typeof CRAFT)[number]) {
+    const counts = new Map<ItemId, number>();
+    for (const id of r.need) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return [...counts].map(([id, need]) => {
+      const have = itemCount(id);
+      return { id, name: ITEM[id].name, have, need, ok: have >= need };
+    });
   }
   function give(id: ItemId) {
     if (id === "food") food += 10;
@@ -623,6 +645,20 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     ];
   }
 
+  function journeyHint() {
+    if (!flags.has("metLord")) return "Цель: найди Халрика в северном зале Вестмера. Открой карту — M.";
+    if (!flags.has("keep")) return "Цель: подними Двор клятвы к югу от дороги. Участок светится на карте — M.";
+    if (!has("torch")) return "Цель: возьми факел у Бруны в таверне «Соль».";
+    if (!has("key") && !has("mark")) return "Цель: добудь ключ у Оскара или прими знак у северного алтаря.";
+    if (!has("codex") && !hasOrDropped("codex")) return "Цель: войди в Чёрную твердыню на востоке и найди крипту.";
+    if (!flags.has("returned")) return "Цель: верни Кодекс Халрику в северном зале.";
+    if (!has("sash")) return "Цель: подними кушак с бочки у западного причала.";
+    if (!flags.has("sailed")) return "Цель: надень кушак в сумке и поговори с Рином на корабле.";
+    if (!has("tide")) return "Цель: найди приливный тайник на северо-востоке острова.";
+    if (!has("stormheart") && !hasOrDropped("stormheart")) return "Цель: спустись в Приливный грот и победи Солевого хранителя.";
+    return "Исследуй остров, строй убежища и создавай снаряжение в мастерской.";
+  }
+
   function talkKeys(n: Npc) {
     return Object.keys(n.words)
       .filter((k) => {
@@ -728,8 +764,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       recipes: CRAFT.map((r) => ({
         out: r.out,
         name: ITEM[r.out].name,
+        desc: ITEM[r.out].desc,
+        slot: ITEM[r.out].slot,
         gold: recipeGold(r),
-        need: r.need.map((n) => ITEM[n].name),
+        need: recipeNeeds(r),
         ok: canMake(r),
       })),
       you: { c: tileC(), r: tileR(), map },
@@ -807,6 +845,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       log: [...log],
       activeSlot,
       mobs: mobs.map((mob) => ({ ...mob })),
+      groundItems: groundItems.map(({ id, map: itemMap, x, y, item }) => ({ id, map: itemMap, x, y, item })),
       cds: { ...cds },
     };
     if (writeGameSave(save)) {
@@ -892,6 +931,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     Object.assign(cds, save.cds);
     mobs = save.mobs.map((mob) => ({ ...mob }));
     mobId = Math.max(1, ...mobs.map((mob) => mob.id + 1));
+    groundItems.length = 0;
+    groundItems.push(
+      ...(save.groundItems ?? [])
+        .filter((drop) => drop.item in ITEM)
+        .map((drop) => ({ ...drop, z: 0, vz: 0, wait: 0 })),
+    );
+    groundItemId = Math.max(1, ...groundItems.map((drop) => drop.id + 1));
 
     if (!tryPos(px, py)) {
       px = SPAWN[map].c * TILE + 16;
@@ -1041,6 +1087,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     shots.length = 0;
     slashes.length = 0;
     coins.length = 0;
+    groundItems.length = 0;
+    groundItemId = 1;
     goldFlash = 0;
     activeSlot = 0;
     moveTo = null;
@@ -1333,6 +1381,58 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
   }
 
+  function groundItemColor(id: ItemId) {
+    if (ITEM[id].slot) return "#f0d58a";
+    if (id === "stormheart" || id === "tide" || id === "codex" || id === "mark") return "#9ed8d0";
+    if (id === "potion" || id === "food") return "#c98a78";
+    return "#a9c48d";
+  }
+
+  function spawnGroundItem(item: ItemId, x: number, y: number, itemMap: MapId = map) {
+    const a = Math.random() * Math.PI * 2;
+    groundItems.push({
+      id: groundItemId++,
+      map: itemMap,
+      x: x + Math.cos(a) * (5 + Math.random() * 10),
+      y: y + Math.sin(a) * (4 + Math.random() * 7),
+      z: 12 + Math.random() * 8,
+      vz: 90 + Math.random() * 45,
+      wait: 0.45,
+      item,
+    });
+  }
+
+  function nearestGroundItem(dist = 46) {
+    let best: GroundItem | null = null;
+    let bestDistance = dist;
+    for (const drop of groundItems) {
+      if (drop.map !== map) continue;
+      const d = Math.hypot(drop.x - px, drop.y - py);
+      if (d < bestDistance) {
+        best = drop;
+        bestDistance = d;
+      }
+    }
+    return best;
+  }
+
+  function takeGroundItem(drop: GroundItem) {
+    const index = groundItems.findIndex((candidate) => candidate.id === drop.id);
+    if (index < 0) return false;
+    groundItems.splice(index, 1);
+    give(drop.item);
+    const color = groundItemColor(drop.item);
+    say(`Поднято: ${ITEM[drop.item].name}.`);
+    burst(drop.x, drop.y, color, ITEM[drop.item].slot ? 20 : 10);
+    float(drop.x, drop.y - 20, `+ ${ITEM[drop.item].name}`, color);
+    emit(true);
+    return true;
+  }
+
+  function hasOrDropped(id: ItemId) {
+    return has(id) || groundItems.some((drop) => drop.item === id);
+  }
+
   function takeCoin(c: Coin) {
     gold += c.n;
     goldFlash = 1;
@@ -1367,13 +1467,22 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const drop = DROP[m.kind];
     if (m.kind === "brine" && drop) {
       flags.add("brineDead");
-      give(drop);
-      say("Солевой хранитель расколот. Сердце шторма всё ещё бьётся.");
+      spawnGroundItem(drop, m.x, m.y);
+      say("Солевой хранитель расколот. Подними Сердце шторма.");
       burst(m.x, m.y, "#9ed8d0", 42);
-      float(m.x, m.y - 24, ITEM[drop].name, "#d8f0e8");
     } else if (drop && Math.random() < 0.55) {
-      give(drop);
-      float(m.x, m.y - 16, ITEM[drop].name, "#c8d0c4");
+      spawnGroundItem(drop, m.x, m.y);
+      say(`Выпало: ${ITEM[drop].name}.`);
+    }
+    if (m.kind === "wraith" && !hasOrDropped("shroud")) {
+      spawnGroundItem("shroud", m.x + 8, m.y);
+      say("Редкая добыча: Плащ тени. Подойди или кликни по нему.");
+    } else if (m.kind === "orc" && !hasOrDropped("steel") && Math.random() < 0.12) {
+      spawnGroundItem("steel", m.x + 8, m.y);
+      say("Редкая добыча: Стальной меч.");
+    } else if (m.kind === "skel" && !hasOrDropped("chain") && Math.random() < 0.1) {
+      spawnGroundItem("chain", m.x + 8, m.y);
+      say("Редкая добыча: Кольчуга.");
     }
     if (mods.siphon) mp = Math.min(maxMp, mp + mods.siphon);
     checkLevel();
@@ -1586,34 +1695,34 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     } else if (map === "hall" && tileC() === 10 && tileR() === 3 && !opened.has(id)) {
       opened.add(id);
       spawnLoot(px, py, 30);
-      give("potion");
-      say("Сундук зала. Золото на камне.");
+      spawnGroundItem("potion", px + 10, py);
+      say("Сундук открыт: золото и зелье лежат на камне.");
     } else if (map === "inn" && tileC() === 3 && tileR() === 4 && !opened.has(id)) {
       opened.add(id);
       give("food");
       say("Запасы Бруны. +еда.");
     } else if (map === "dungeon" && tileC() === 3 && tileR() === 3 && !opened.has(id)) {
       opened.add(id);
-      give("potion");
+      spawnGroundItem("potion", px + 10, py);
       spawnLoot(px, py, 18);
-      say("Сундук: зелье. Золото сыпется.");
+      say("Сундук открыт: подними зелье и золото.");
     } else if (map === "over" && Math.abs(tileC() - DOCK.c) + Math.abs(tileR() - DOCK.r) <= 1 && !opened.has("dock-sash")) {
       opened.add("dock-sash");
-      give("sash");
-      say("С бочки у борта — мокрый кушак. Рин это увидит.");
+      spawnGroundItem("sash", px + 10, py);
+      say("Мокрый кушак упал с бочки. Подними его.");
     } else if (map === "isle" && tileC() === 28 && tileR() === 6 && !opened.has("isle-chest")) {
       opened.add("isle-chest");
       spawnLoot(px, py, 40);
-      give("tide");
-      give("cloth");
-      say("Приливный камень. Соль жжёт ладонь. Вторая клятва.");
+      spawnGroundItem("tide", px + 9, py);
+      spawnGroundItem("cloth", px - 9, py);
+      say("Тайник открыт. Приливный камень и полотно лежат у ног.");
     } else if (map === "crypt" && tileC() === 8 && tileR() === 2) {
       const guard = mobs.find((m) => m.kind === "wraith" && m.hp > 0);
       if (guard) say("Призрак не отдаст книгу.");
       else if (!has("key") && !has("mark")) say("Плита заперта. Нужен ключ или знак.");
-      else if (!has("codex")) {
-        give("codex");
-        say("Кодекс клятвы. Неси Халрику.");
+      else if (!hasOrDropped("codex")) {
+        spawnGroundItem("codex", px + 8, py);
+        say("Плита открылась. Подними Кодекс клятвы.");
         burst(px, py, "#d8c070", 20);
       } else say("Пусто.");
     } else return false;
@@ -1623,6 +1732,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function interact() {
     if (mode !== "play") return;
+    const groundItem = nearestGroundItem();
+    if (groundItem) {
+      takeGroundItem(groundItem);
+      return;
+    }
     const n = npcNear();
     if (n) {
       startTalk(n);
@@ -2069,12 +2183,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       } else moveTo = { x: talkGo.c * TILE + 16, y: talkGo.r * TILE + 16 };
     }
     if (interactGo) {
-      const d = Math.hypot(interactGo.c * TILE + 16 - px, interactGo.r * TILE + 16 - py);
+      const d = Math.hypot(interactGo.x - px, interactGo.y - py);
       if (d < 34) {
         interactGo = null;
         moveTo = null;
         interact();
-      } else moveTo = { x: interactGo.c * TILE + 16, y: interactGo.r * TILE + 16 };
+      } else moveTo = { x: interactGo.x, y: interactGo.y };
     }
     if (huntId) {
       const prey = mobs.find((m) => m.id === huntId && m.hp > 0 && m.map === map);
@@ -2122,11 +2236,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     } else lavaT = 0;
 
     const n = npcNear(42);
+    const nearbyDrop = nearestGroundItem(78);
     const node = gatherNodeAt(map, tileC(), tileR(), 2);
     const gather = node && !opened.has(`node:${node.id}`) ? node : null;
     const plot = siteAt(map, tileC(), tileR());
-    hint = n
-      ? `E — ${n.name}`
+    hint = nearbyDrop
+      ? `E / клик — поднять: ${ITEM[nearbyDrop.item].name}`
+      : n
+      ? `E / клик — поговорить: ${n.name}`
       : gather
         ? `E / ЛКМ — ${gather.label}`
         : plot
@@ -2136,16 +2253,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         : map === "keep"
           ? "E / ЛКМ — строить · кузница шьёт плащи"
           : map === "ship"
-            ? "Рин на палубе. Кушак на тебе — и ур. 3"
+            ? "Цель: поговори с Рином. Для плавания нужен надетый кушак и уровень 3."
             : map === "over" && Math.hypot(DOCK.c * TILE - px, DOCK.r * TILE - py) < 70
-              ? "E — бочка с кушаком · на борт Соляного киля"
+              ? "E / клик — открыть бочку с кушаком у борта"
               : map === "over"
-                ? "M — карта мира · E в лесу — дерево, в топи — трава"
+                ? journeyHint()
                 : map === "isle"
-                  ? "ЛКМ — подсвеченные ресурсы и стройки · ПКМ — активка"
+                  ? journeyHint()
                   : map === "grotto"
-                    ? "Солевой хранитель в глубине · выход на юге"
-                  : "ЛКМ — идти и бить · ПКМ — активка · WASD";
+                    ? journeyHint()
+                  : "Кликни по подсвеченному объекту, чтобы подойти и взаимодействовать.";
     for (const w of WAYPOINTS) {
       if (w.map !== map || stones.has(w.id)) continue;
       if (Math.hypot(w.c * TILE + 16 - px, w.r * TILE + 16 - py) < 48) {
@@ -2373,6 +2490,26 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       s.x += s.vx * dt;
       s.y += s.vy * dt;
       if (s.life <= 0) sparks.splice(i, 1);
+    }
+    for (let i = groundItems.length - 1; i >= 0; i--) {
+      const drop = groundItems[i];
+      drop.wait -= dt;
+      drop.vz -= 440 * dt;
+      drop.z += drop.vz * dt;
+      if (drop.z < 0) {
+        drop.z = 0;
+        drop.vz *= -0.3;
+      }
+      if (drop.map !== map || drop.wait > 0) continue;
+      const dx = px - drop.x;
+      const dy = py - drop.y;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d < 42) {
+        const pull = Math.min(1, dt * 8);
+        drop.x += dx * pull;
+        drop.y += dy * pull;
+        if (d < 16) takeGroundItem(drop);
+      }
     }
     for (let i = coins.length - 1; i >= 0; i--) {
       const c = coins[i];
@@ -2890,6 +3027,78 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.restore();
     }
 
+    for (const drop of groundItems) {
+      if (drop.map !== map) continue;
+      const floor = wrld(drop.x, drop.y);
+      const p = wrld(drop.x, drop.y - drop.z - 8);
+      const color = groundItemColor(drop.item);
+      const pulse = 0.72 + Math.sin(time * 5 + drop.id) * 0.18;
+      ctx.save();
+      const beam = ctx.createLinearGradient(p.x, p.y - 34, p.x, floor.y + 4);
+      beam.addColorStop(0, "transparent");
+      beam.addColorStop(1, `${color}66`);
+      ctx.fillStyle = beam;
+      ctx.fillRect(p.x - 8, p.y - 34, 16, floor.y - p.y + 38);
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = ITEM[drop.item].slot ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.ellipse(floor.x, floor.y + 4, ITEM[drop.item].slot ? 13 : 10, 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "rgba(10,12,16,0.92)";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.fillRect(-8, -8, 16, 16);
+      ctx.strokeRect(-8, -8, 16, 16);
+      ctx.rotate(-Math.PI / 4);
+      ctx.fillStyle = color;
+      const slot = ITEM[drop.item].slot;
+      if (slot === "wep") {
+        ctx.rotate(-0.65);
+        ctx.fillRect(-1.5, -7, 3, 14);
+        ctx.fillRect(-5, 3, 10, 2);
+      } else if (slot === "arm") {
+        ctx.fillRect(-5, -5, 10, 10);
+        ctx.fillStyle = "rgba(10,12,16,0.75)";
+        ctx.fillRect(-2, -5, 4, 4);
+      } else if (slot === "cloak") {
+        ctx.beginPath();
+        ctx.moveTo(0, -6);
+        ctx.lineTo(6, 6);
+        ctx.lineTo(-6, 6);
+        ctx.closePath();
+        ctx.fill();
+      } else if (slot === "helm") {
+        ctx.beginPath();
+        ctx.arc(0, 1, 6, Math.PI, Math.PI * 2);
+        ctx.lineTo(6, 5);
+        ctx.lineTo(-6, 5);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(-4, -4, 8, 8);
+      }
+      ctx.restore();
+
+      const distance = Math.hypot(drop.x - px, drop.y - py);
+      if (ITEM[drop.item].slot || distance < 105) {
+        const label = distance < 78 ? `КЛИК · ${ITEM[drop.item].name}` : ITEM[drop.item].name;
+        ctx.save();
+        ctx.font = "600 11px IBM Plex Mono, monospace";
+        ctx.textAlign = "center";
+        const width = ctx.measureText(label).width + 16;
+        ctx.fillStyle = "rgba(8,10,13,0.9)";
+        ctx.fillRect(p.x - width / 2, p.y - 32, width, 20);
+        ctx.strokeStyle = `${color}99`;
+        ctx.strokeRect(p.x - width / 2, p.y - 32, width, 20);
+        ctx.fillStyle = color;
+        ctx.fillText(label, p.x, p.y - 18);
+        ctx.restore();
+      }
+    }
+
     const ps = wrld(px - 18, py - 28);
     const cx = ps.x + 19;
     const cy = ps.y + 22;
@@ -3221,11 +3430,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function interactionTargetAt(wx: number, wy: number) {
-    const candidates: { c: number; r: number; d: number }[] = [];
+    const candidates: { x: number; y: number; d: number }[] = [];
     const consider = (c: number, r: number, radius = 30) => {
-      const d = Math.hypot(c * TILE + 16 - wx, r * TILE + 16 - wy);
-      if (d <= radius) candidates.push({ c, r, d });
+      const x = c * TILE + 16;
+      const y = r * TILE + 16;
+      const d = Math.hypot(x - wx, y - wy);
+      if (d <= radius) candidates.push({ x, y, d });
     };
+    for (const drop of groundItems) {
+      if (drop.map !== map) continue;
+      const d = Math.hypot(drop.x - wx, drop.y - wy);
+      if (d <= 34) candidates.push({ x: drop.x, y: drop.y, d });
+    }
     for (const node of GATHER_NODES) {
       if (node.map === map && !opened.has(`node:${node.id}`)) consider(node.c, node.r, 32);
     }
@@ -3260,8 +3476,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     const target = interactionTargetAt(wx, wy);
     if (target) {
-      interactGo = { c: target.c, r: target.r };
-      moveTo = { x: target.c * TILE + 16, y: target.r * TILE + 16 };
+      interactGo = { x: target.x, y: target.y };
+      moveTo = { x: target.x, y: target.y };
       return;
     }
     for (const m of mobs) {

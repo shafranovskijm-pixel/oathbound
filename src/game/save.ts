@@ -34,6 +34,14 @@ export type SavedRaid = {
   towerCd: number;
 };
 
+export type SavedGroundItem = {
+  id: number;
+  map: MapId;
+  x: number;
+  y: number;
+  item: ItemId;
+};
+
 export type GameSave = {
   version: typeof SAVE_VERSION;
   updatedAt: number;
@@ -72,6 +80,7 @@ export type GameSave = {
   log: string[];
   activeSlot: number;
   mobs: SavedMob[];
+  groundItems?: SavedGroundItem[];
   cds: Partial<Record<SpellId, number>>;
 };
 
@@ -128,6 +137,18 @@ function validRaid(value: unknown) {
   );
 }
 
+function validGroundItem(value: unknown) {
+  if (!record(value)) return false;
+  return (
+    finite(value.id) &&
+    typeof value.map === "string" &&
+    MAP_IDS.has(value.map) &&
+    finite(value.x) &&
+    finite(value.y) &&
+    typeof value.item === "string"
+  );
+}
+
 export function decodeGameSave(raw: string | null): GameSave | null {
   if (!raw) return null;
   try {
@@ -168,6 +189,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     if (![value.worn.wep, value.worn.arm, value.worn.cloak].every((item) => item === null || typeof item === "string")) return null;
     if (typeof value.lyra !== "boolean" || typeof value.vaultVisit !== "boolean") return null;
     if (!validPortal(value.fieldPortal) || !Array.isArray(value.mobs) || !value.mobs.every(validMob)) return null;
+    if (value.groundItems !== undefined && (!Array.isArray(value.groundItems) || !value.groundItems.every(validGroundItem))) return null;
     if (!record(value.cds) || !Object.values(value.cds).every(finite)) return null;
     return value as GameSave;
   } catch {
