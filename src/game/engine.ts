@@ -10,7 +10,7 @@ import {
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, SITES, gatherNodeAt, siteAt, type SiteId } from "./data";
-import { readGameSave, writeGameSave, type GameSave, type SavedKeepDefense, type SavedMode, type SavedRaid } from "./save";
+import { readGameSave, writeGameSave, type GameSave, type SavedKeepDefense, type SavedMode, type SavedRaid, type SavedTransport } from "./save";
 import {
   EXITS,
   MAP_SIZE,
@@ -54,6 +54,8 @@ export type Snapshot = {
   place: string;
   xpNeed: number;
   meleeCd: number;
+  dodgeCd: number;
+  transport: { id: SavedTransport; name: string; speed: number; action: string };
   buildings: {
     id: BuildId;
     name: string;
@@ -159,6 +161,7 @@ export type GameHandle = {
   returnToMenu: () => void;
   keyword: (k: string) => void;
   attack: () => void;
+  dodge: () => void;
   cast: (slot: number) => void;
   interact: () => void;
   pickTalent: (id: TalentId) => void;
@@ -254,6 +257,7 @@ type Mob = {
   windup: number;
   windupMax: number;
   attackTarget: "player" | "haven" | "keep";
+  guard: number;
 };
 type Shot = {
   x: number;
@@ -350,11 +354,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let lavaT = 0;
   let exitLock = 0;
   let meleeCd = 0;
+  let dodgeCd = 0;
+  let dodgeT = 0;
+  let dodgeDx = 0;
+  let dodgeDy = 1;
   let lunge = 0;
   let shieldT = 0;
   let markT = 0;
   let gearFxT = 0;
   let iframe = 0;
+  let transport: SavedTransport = "foot";
+  let transportAngle = 0;
   let lyraAtk = 0;
 
   let mode: Mode = "menu";
@@ -396,7 +406,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let raid: SavedRaid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
   let keepDefense: SavedKeepDefense = { active: false, wave: 0, hp: 70, maxHp: 70, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
   const log: string[] = [];
-  let hint = "WASD ход · E действие · Пробел удар · 1 2 3 магия";
+  let hint = "WASD ход · E действие · Пробел удар · Shift уворот · 1 2 3 магия";
   let talkNpc: Npc | null = null;
   let talkText = "";
   let lastAsk = "";
@@ -448,8 +458,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     stun: 0,
   };
 
-  function mkMob(m: MapId, c: number, r: number, kind: MobKind): Mob {
-    const hp0 = MOB[kind].hp;
+  function mkMob(m: MapId, c: number, r: number, kind: MobKind, hpOverride?: number): Mob {
+    const hp0 = hpOverride ?? MOB[kind].hp;
     return {
       id: mobId++,
       map: m,
@@ -467,12 +477,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       windup: 0,
       windupMax: 0,
       attackTarget: "player",
+      guard: kind === "crab" ? 1 : 0,
     };
   }
 
   function seedMobs() {
     mobs = [
-      mkMob("shoal", 14, 13, "crab"),
+      mkMob("shoal", 14, 13, "crab", 34),
+      mkMob("strait", 18, 9, "skiff"),
+      mkMob("strait", 33, 15, "skiff"),
       mkMob("over", 10, 14, "wolf"),
       mkMob("over", 8, 26, "wolf"),
       mkMob("over", 20, 12, "wolf"),
@@ -881,7 +894,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Обыскать разбитый сундук и одеться", done: opened.has("shoal-wreck") },
       { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
       { text: "Собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
-      { text: "Покинуть Остров Трёх досок", done: flags.has("leftShoal") },
+      { text: transport === "boat" || map === "strait" ? "Провести лодку через пролив и отбиться от шлюпов" : "Спустить лодку и встать за штурвал", done: flags.has("leftShoal") },
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
       { text: "Поднять Двор клятвы (юг от дороги)", done: flags.has("keep") },
       { text: "Взять факел у Бруны", done: has("torch") },
@@ -921,7 +934,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (!opened.has("shoal-wreck")) return "Цель: осмотри разбитый сундук на западном пляже — там первая одежда, клинок и несколько монет.";
       if (!has("mapshard")) return "Цель: зайди в бар «Три доски» на севере тропы и купи у Нолла первый обрывок карты за 3 золота.";
       if (!flags.has("raftBuilt")) return "Цель: собери 4 дерева, 2 полотна и 1 руду. Каркас лодки ждёт на восточном пляже.";
-      return "Цель: кликни по готовой лодке и отплывай к Вестмеру. Первый обрывок карты уже у тебя.";
+      if (transport !== "boat") return "Цель: кликни по готовой лодке, встань за штурвал и сам выведи её с восточного пляжа.";
+      return map === "strait" ? "Цель: пройди пролив. WASD — штурвал, ЛКМ — гарпун, Shift — резкий манёвр." : "Цель: веди лодку на восток через прибой. Ты управляешь ею напрямую.";
     }
     if (!flags.has("metLord")) return "Цель: найди Халрика в северном зале Вестмера. Открой карту — M.";
     if (!flags.has("keep")) return "Цель: подними Двор клятвы к югу от дороги. Участок светится на карте — M.";
@@ -952,7 +966,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const storedSave = mode === "menu" ? readGameSave() : null;
     const targetMob = mobs.find((mob) => mob.id === huntId && mob.map === map && mob.hp > 0) ?? null;
     const targetStatuses = targetMob
-      ? [targetMob.stun > 0 ? "оглушён" : "", targetMob.slow > 0 ? "замедлен" : "", targetMob.poison > 0 ? "отравлен" : ""].filter(Boolean)
+      ? [targetMob.guard > 0 ? "панцирь" : "", targetMob.stun > 0 ? "оглушён" : "", targetMob.slow > 0 ? "замедлен" : "", targetMob.poison > 0 ? "отравлен" : ""].filter(Boolean)
       : [];
     return {
       mode,
@@ -997,6 +1011,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       place: PLACE[map],
       xpNeed: level * 36,
       meleeCd,
+      dodgeCd,
+      transport: transportInfo(),
       buildings: BUILDINGS.map((b) => ({
         id: b.id,
         name: b.name,
@@ -1034,7 +1050,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             hp: Math.max(0, targetMob.hp),
             maxHp: targetMob.max,
             attackName: mobAttackName(targetMob.kind),
-            intent: targetMob.windup > 0 ? "ГОТОВИТ УДАР" : targetMob.stun > 0 ? "ОГЛУШЁН" : targetMob.poison > 0 ? "ОТРАВЛЕН" : targetMob.slow > 0 ? "ЗАМЕДЛЕН" : "В БОЮ",
+            intent: targetMob.windup > 0 ? "ГОТОВИТ УДАР" : targetMob.guard > 0 ? "ДЕРЖИТ ПАНЦИРЬ" : targetMob.stun > 0 ? "ОГЛУШЁН" : targetMob.poison > 0 ? "ОТРАВЛЕН" : targetMob.slow > 0 ? "ЗАМЕДЛЕН" : "В БОЮ",
             windup: targetMob.windupMax > 0 ? Math.max(0, 1 - targetMob.windup / targetMob.windupMax) : 0,
             statuses: targetStatuses,
           }
@@ -1159,6 +1175,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       version: 1,
       updatedAt: now,
       worldTime: time,
+      transport,
+      transportAngle,
       mode: savedMode(),
       heroId,
       map,
@@ -1223,6 +1241,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     xp = save.xp;
     level = Math.max(1, Math.floor(save.level));
     time = Math.max(0, save.worldTime ?? 0);
+    transport = save.transport ?? (save.map === "strait" ? "boat" : "foot");
+    transportAngle = save.transportAngle ?? 0;
     tideCycle = Math.floor(time / 75);
     str = save.str;
     baseSpd = save.baseSpd;
@@ -1290,7 +1310,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     recalcKeep();
     for (const key of Object.keys(cds)) delete cds[key];
     Object.assign(cds, save.cds);
-    mobs = save.mobs.map((mob) => ({ ...mob, windup: 0, windupMax: 0, attackTarget: "player" as const }));
+    mobs = save.mobs.map((mob) => ({ ...mob, guard: mob.guard ?? (mob.kind === "crab" ? 1 : 0), windup: 0, windupMax: 0, attackTarget: "player" as const }));
+    if (!flags.has("leftShoal")) {
+      const starterCrab = mobs.find((mob) => mob.map === "shoal" && mob.kind === "crab" && mob.hp > 0);
+      if (starterCrab && starterCrab.max < 34) {
+        starterCrab.hp += 34 - starterCrab.max;
+        starterCrab.max = 34;
+      }
+      if (!mobs.some((mob) => mob.map === "strait" && mob.kind === "skiff")) {
+        mobs.push(mkMob("strait", 18, 9, "skiff"), mkMob("strait", 33, 15, "skiff"));
+      }
+    }
     mobId = Math.max(1, ...mobs.map((mob) => mob.id + 1));
     groundItems.length = 0;
     groundItems.push(
@@ -1413,6 +1443,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     vx = 0;
     vy = 0;
     dir = 0;
+    transport = "foot";
+    transportAngle = 0;
+    dodgeCd = 0;
+    dodgeT = 0;
     maxHp = h.hp;
     hp = h.hp;
     maxMp = h.mp;
@@ -1487,10 +1521,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return Math.floor(py / TILE);
   }
   function solidAt(x: number, y: number) {
+    const tile = tileAt(map, Math.floor(x / TILE), Math.floor(y / TILE));
+    if (transport === "bird" || transport === "dragon") return false;
+    if (transport === "boat") return tile !== "~" && tile !== ",";
     return blocked(map, Math.floor(x / TILE), Math.floor(y / TILE));
   }
+  function mobSolidAt(mob: Mob, x: number, y: number) {
+    const tile = tileAt(mob.map, Math.floor(x / TILE), Math.floor(y / TILE));
+    if (mob.kind === "skiff") return tile !== "~" && tile !== ",";
+    return blocked(mob.map, Math.floor(x / TILE), Math.floor(y / TILE));
+  }
   function tryPos(nx: number, ny: number) {
-    const r = 9;
+    const r = transport === "boat" ? 14 : 9;
     return !solidAt(nx - r, ny) && !solidAt(nx + r, ny) && !solidAt(nx, ny - r * 0.4) && !solidAt(nx, ny + r);
   }
 
@@ -1723,7 +1765,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + helmArmor;
   }
   function moveSpeed() {
+    if (transport === "boat") return 154;
+    if (transport === "horse") return 190;
+    if (transport === "bird") return 215;
+    if (transport === "dragon") return 245;
     return baseSpd + mods.spd + (worn.cloak === "shroud" ? 12 : 0);
+  }
+  function transportInfo() {
+    if (transport === "boat") return { id: transport, name: "Лодка Трёх досок", speed: Math.round(moveSpeed()), action: "ЛКМ — гарпун · WASD — штурвал" };
+    if (transport === "horse") return { id: transport, name: "Верхом", speed: Math.round(moveSpeed()), action: "Shift — рывок" };
+    if (transport === "bird") return { id: transport, name: "На птице", speed: Math.round(moveSpeed()), action: "Свободный полёт" };
+    if (transport === "dragon") return { id: transport, name: "На драконе", speed: Math.round(moveSpeed()), action: "Свободный полёт" };
+    return { id: transport, name: "Пешком", speed: Math.round(moveSpeed()), action: "Shift — уворот" };
   }
   function spellPower() {
     return (worn.cloak === "robe" ? 2 : worn.cloak === "stormcloak" ? 3 : 0) + (worn.helm === "tidehelm" ? 1 : worn.helm === "firecrown" ? 2 : 0);
@@ -1777,6 +1830,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (kind === "wraith") return "Холод могилы";
     if (kind === "crab") return "Клешня";
     if (kind === "raider") return "Абордажный удар";
+    if (kind === "skiff") return "Таранный заход";
     return "Приливный разгром";
   }
 
@@ -1928,13 +1982,25 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function hurtMob(m: Mob, dmg: number, kb = 0, ang = 0, impactColor = "#e8dcc8") {
     if (m.hp <= 0) return;
+    if (m.guard > 0) {
+      m.guard -= 1;
+      dmg = Math.min(2, dmg);
+      m.stun = Math.max(m.stun, 0.22);
+      float(m.x, m.y - 23, "ПАНЦИРЬ ТРЕСНУЛ", "#f0d58a");
+      burst(m.x, m.y, "#e8c070", 18);
+      addMagic("wave", m.x, m.y, "#e8c070", 28, 0.4, ang);
+      if (m.map === "shoal" && !flags.has("crabLesson")) {
+        flags.add("crabLesson");
+        say("Панцирь принял первый удар. Следи за красным кругом и уходи на Shift, когда клешня занесена.");
+      }
+    }
     m.hp -= dmg;
     m.flash = 0.12;
     float(m.x, m.y - 12, `-${dmg}`, "#e8e4d8");
     if (kb && m.kind !== "brine") {
       const nx = m.x + Math.cos(ang) * kb;
       const ny = m.y + Math.sin(ang) * kb;
-      if (!solidAt(nx, ny)) {
+      if (!mobSolidAt(m, nx, ny)) {
         m.x = nx;
         m.y = ny;
       }
@@ -1964,6 +2030,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       gold = Math.floor(gold / 2);
       hp = Math.max(6, Math.floor(maxHp / 2));
       map = "inn";
+      transport = "foot";
+      vx = 0;
+      vy = 0;
       px = SPAWN.inn.c * TILE + 16;
       py = SPAWN.inn.r * TILE + 16;
       cam.x = px;
@@ -2016,10 +2085,63 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function attack() {
     if (mode !== "play" || meleeCd > 0) return;
     if (hasAim) faceWorld(aimX, aimY);
+    if (transport === "boat") {
+      meleeCd = 0.58;
+      const ang = aim();
+      fireShot({
+        x: px + Math.cos(ang) * 24,
+        y: py + Math.sin(ang) * 24,
+        vx: Math.cos(ang) * 340,
+        vy: Math.sin(ang) * 340,
+        vz: 0,
+        z: 10,
+        grav: 0,
+        life: 1.45,
+        dmg: 8 + Math.floor(level / 2),
+        r: 4,
+        color: "#f0d58a",
+        kind: "arrow",
+      });
+      addSlash(px, py, ang, 34, "#f0d58a", "arc", 0.18);
+      burst(px + Math.cos(ang) * 24, py + Math.sin(ang) * 24, "#f0d58a", 7);
+      shake = 0.08;
+      audio.hit();
+      return;
+    }
     meleeCd = heroId === "vessa" ? 0.42 : heroId === "kael" ? 0.32 : 0.38;
     const ang = aim();
     const r = (worn.wep === "harpoon" ? 62 : heroId === "aldric" ? 46 : 34) * mods.slash;
     slashAt(px, py, ang, r, meleeDmg(), heroId === "aldric" ? "#e8e4d8" : "#c8d0c4", !!mods.whirl);
+  }
+
+  function dodge() {
+    if (mode !== "play" || dodgeCd > 0) return;
+    let dx = 0;
+    let dy = 0;
+    if (down("KeyW") || down("ArrowUp")) dy -= 1;
+    if (down("KeyS") || down("ArrowDown")) dy += 1;
+    if (down("KeyA") || down("ArrowLeft")) dx -= 1;
+    if (down("KeyD") || down("ArrowRight")) dx += 1;
+    dx += stickX;
+    dy += stickY;
+    const mag = Math.hypot(dx, dy);
+    if (mag > 0.2) {
+      dodgeDx = dx / mag;
+      dodgeDy = dy / mag;
+    } else {
+      [dodgeDx, dodgeDy] = FACE[dir];
+    }
+    dodgeT = transport === "boat" ? 0.22 : 0.16;
+    dodgeCd = transport === "boat" ? 1.4 : 1.05;
+    iframe = Math.max(iframe, transport === "boat" ? 0.3 : 0.36);
+    moveTo = null;
+    if (transport === "boat") {
+      addMagic("wave", px, py, "#b9eee4", 31, 0.38, Math.atan2(dodgeDy, dodgeDx));
+      say("Резкий поворот. Таран прошёл мимо.");
+    } else {
+      addMagic("afterimage", px, py, "#d8e8df", 24, 0.34, Math.atan2(dodgeDy, dodgeDx), dir);
+    }
+    emit(true);
   }
 
   function cast(slot: number) {
@@ -2212,8 +2334,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return true;
     }
-    flags.add("leftShoal");
-    warp("over", SPAWN.over.c, SPAWN.over.r, "Первый парус выдержал. Впереди Вестмер — земля, где ещё шесть частей карты могут стоить дружбы, золота или крови.");
+    transport = "boat";
+    transportAngle = 0;
+    px = 24 * TILE + 16;
+    py = 13 * TILE + 16;
+    vx = 0;
+    vy = 0;
+    moveTo = null;
+    say("Ты столкнул лодку в прибой и взял румпель. WASD — штурвал, ЛКМ — палубный гарпун, Shift — резкий манёвр. Иди на восток.");
+    burst(px, py, "#b9eee4", 28);
+    audio.ok();
+    emit(true);
     return true;
   }
 
@@ -2628,6 +2759,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     exitLock = Math.max(0, exitLock - dt);
     portalLock = Math.max(0, portalLock - dt);
     meleeCd = Math.max(0, meleeCd - dt);
+    dodgeCd = Math.max(0, dodgeCd - dt);
     lunge = Math.max(0, lunge - dt);
     shieldT = Math.max(0, shieldT - dt);
     markT = Math.max(0, markT - dt);
@@ -2637,7 +2769,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (map === "keep" && built.has("hearth")) {
       audio.setAmbience("fire");
       if (Math.random() < dt * 2.2) audio.crackle();
-    } else if (map === "shoal" || map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
+    } else if (map === "shoal" || map === "strait" || map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
       audio.setAmbience("sea");
     } else audio.setAmbience("none");
     for (const k of Object.keys(cds)) cds[k] = Math.max(0, cds[k] - dt);
@@ -2678,16 +2810,60 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     const slow = tileAt(map, tileC(), tileR());
     const spd = ((slow === "f" || slow === "s" ? 0.72 : 1) * moveSpeed());
-    vx = mx * spd;
-    vy = my * spd;
+    if (transport === "boat") {
+      const response = Math.min(1, dt * 3.2);
+      vx += (mx * spd - vx) * response;
+      vy += (my * spd - vy) * response;
+      if (mag < 0.2) {
+        vx *= Math.max(0, 1 - dt * 1.8);
+        vy *= Math.max(0, 1 - dt * 1.8);
+      }
+      if (Math.hypot(vx, vy) > 8) transportAngle = Math.atan2(vy, vx);
+    } else {
+      vx = mx * spd;
+      vy = my * spd;
+    }
     const [lx, ly] = [Math.cos(aim()), Math.sin(aim())];
-    const nx = px + vx * dt + (lunge > 0 ? lx * 90 * dt : 0);
-    const ny = py + vy * dt + (lunge > 0 ? ly * 90 * dt : 0);
+    const dodging = dodgeT > 0;
+    dodgeT = Math.max(0, dodgeT - dt);
+    const dodgeSpeed = transport === "boat" ? 240 : 430;
+    const nx = px + vx * dt + (lunge > 0 ? lx * 90 * dt : 0) + (dodging ? dodgeDx * dodgeSpeed * dt : 0);
+    const ny = py + vy * dt + (lunge > 0 ? ly * 90 * dt : 0) + (dodging ? dodgeDy * dodgeSpeed * dt : 0);
     if (tryPos(nx, py)) px = nx;
     if (tryPos(px, ny)) py = ny;
     const size = MAP_SIZE[map];
     px = Math.max(20, Math.min(size.cols * TILE - 20, px));
     py = Math.max(20, Math.min(size.rows * TILE - 20, py));
+
+    if (map === "shoal" && transport === "boat" && tileC() >= 26) {
+      map = "strait";
+      px = SPAWN.strait.c * TILE + 16;
+      py = SPAWN.strait.r * TILE + 16;
+      cam.x = px;
+      cam.y = py;
+      moveTo = null;
+      say("Парус поймал ветер. Теперь ты сам держишь штурвал: WASD ведёт лодку, ЛКМ выпускает палубный гарпун, Shift уводит от тарана.");
+      flags.add("maidenVoyage");
+      emit(true);
+      return;
+    }
+    if (map === "strait" && tileC() >= MAP_SIZE.strait.cols - 2) {
+      const enemies = mobs.filter((mob) => mob.map === "strait" && mob.kind === "skiff" && mob.hp > 0);
+      if (enemies.length) {
+        px = (MAP_SIZE.strait.cols - 2.6) * TILE;
+        if (!flags.has("straitBlocked")) {
+          flags.add("straitBlocked");
+          say(`Шлюпы режут путь к материку. Осталось: ${enemies.length}. Разверни лодку и бей гарпуном.`);
+        }
+      } else {
+        flags.add("leftShoal");
+        transport = "foot";
+        vx = 0;
+        vy = 0;
+        warp("over", SPAWN.over.c, SPAWN.over.r, "Ты сам провёл лодку через пролив и отбил первый морской налёт. Впереди Вестмер и ещё шесть частей карты Мора.");
+        return;
+      }
+    }
 
     if (talkGo) {
       const d = Math.hypot(talkGo.c * TILE + 16 - px, talkGo.r * TILE + 16 - py);
@@ -2710,9 +2886,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const prey = mobs.find((m) => m.id === huntId && m.hp > 0 && m.map === map);
       if (!prey) huntId = 0;
       else {
-        moveTo = { x: prey.x, y: prey.y };
         const d = Math.hypot(prey.x - px, prey.y - py);
-        if (d < 42) {
+        if (transport === "boat") {
+          moveTo = null;
+        } else {
+          moveTo = { x: prey.x, y: prey.y };
+        }
+        if (transport !== "boat" && d < 42) {
           faceWorld(prey.x, prey.y);
           attack();
         }
@@ -2758,7 +2938,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const node = gatherNodeAt(map, tileC(), tileR(), 2);
     const gather = node && !opened.has(`node:${node.id}`) ? node : null;
     const plot = siteAt(map, tileC(), tileR());
-    hint = nearbyDrop
+    hint = transport === "boat"
+      ? journeyHint()
+      : nearbyDrop
       ? `E / клик — поднять: ${ITEM[nearbyDrop.item].name}`
       : n
       ? `E / клик — поговорить: ${n.name}`
@@ -2818,7 +3000,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const dx = targetX - m.x;
       const dy = targetY - m.y;
       const dist = Math.hypot(dx, dy);
-      const aggro = m.kind === "raider" ? Infinity : m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
+      const aggro = m.kind === "raider" || m.kind === "skiff" ? Infinity : m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
+      if (m.map === "shoal" && m.kind === "crab" && playerDist < 145 && !flags.has("crabSeen")) {
+        flags.add("crabSeen");
+        say("Панцирник закрывается от первого удара. Красный круг показывает замах: Shift — уворот, затем бей в раскрытый бок.");
+      }
       if (m.kind === "brine" && playerDist < 260 && !flags.has("brineSeen")) {
         flags.add("brineSeen");
         say("СОЛЕВОЙ ХРАНИТЕЛЬ. Панцирь шевелится вместе со всем гротом.");
@@ -2826,7 +3012,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         shake = 0.55;
       }
 
-      const reach = m.kind === "brine" ? 68 : attacksHaven || attacksKeep ? 30 : 22;
+      const reach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : attacksHaven || attacksKeep ? 30 : 22;
       if (m.windup > 0) {
         m.windup = Math.max(0, m.windup - dt);
         if (m.windup <= 0) {
@@ -2837,9 +3023,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           const hitDx = hitX - m.x;
           const hitDy = hitY - m.y;
           const hitDist = Math.hypot(hitDx, hitDy);
-          const hitReach = m.kind === "brine" ? 68 : hitsHaven || hitsKeep ? 30 : 22;
-          const attackColor = m.kind === "brine" ? "#9ed8d0" : m.kind === "wraith" ? "#b89ad8" : m.kind === "crab" ? "#d8a06a" : "#d58a78";
-          m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : 0.85;
+          const hitReach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : hitsHaven || hitsKeep ? 30 : 22;
+          const attackColor = m.kind === "brine" ? "#9ed8d0" : m.kind === "skiff" ? "#f0b06b" : m.kind === "wraith" ? "#b89ad8" : m.kind === "crab" ? "#d8a06a" : "#d58a78";
+          m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "skiff" ? 1.35 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : m.kind === "crab" ? 1.12 : 0.85;
           if (hitDist < hitReach + 18) {
             addSlash(m.x, m.y, Math.atan2(hitDy, hitDx), m.kind === "brine" ? 62 : 34, attackColor, "enemy", 0.24);
             burst(m.x + hitDx * 0.55, m.y + hitDy * 0.55, attackColor, m.kind === "brine" ? 22 : 8);
@@ -2870,27 +3056,27 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
       if (dist < aggro && dist > 18) {
         const sp =
-          (m.kind === "wolf" ? 70 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) *
+          (m.kind === "wolf" ? 70 : m.kind === "skiff" ? 74 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) *
           (m.slow > 0 ? 0.4 : 1) *
           (attacksKeep && built.has("gate") ? 0.62 : 1);
         const mx2 = m.x + (dx / dist) * sp * dt;
         const my2 = m.y + (dy / dist) * sp * dt;
-        if (!solidAt(mx2, m.y)) m.x = mx2;
-        if (!solidAt(m.x, my2)) m.y = my2;
+        if (!mobSolidAt(m, mx2, m.y)) m.x = mx2;
+        if (!mobSolidAt(m, m.x, my2)) m.y = my2;
       } else {
         m.wait -= dt;
         if (m.wait <= 0) {
           m.wait = 0.6 + Math.random();
           const ox = m.x + ((Math.random() * 3 | 0) - 1) * 16;
           const oy = m.y + ((Math.random() * 3 | 0) - 1) * 16;
-          if (!solidAt(ox, oy)) {
+          if (!mobSolidAt(m, ox, oy)) {
             m.x = ox;
             m.y = oy;
           }
         }
       }
       if (dist < reach && m.atkCd <= 0) {
-        m.windupMax = m.kind === "brine" ? 0.78 : m.kind === "orc" ? 0.5 : m.kind === "wraith" ? 0.42 : 0.34;
+        m.windupMax = m.kind === "brine" ? 0.78 : m.kind === "skiff" ? 0.86 : m.kind === "crab" ? 0.68 : m.kind === "orc" ? 0.5 : m.kind === "wraith" ? 0.42 : 0.34;
         m.windup = m.windupMax;
         m.attackTarget = attacksKeep ? "keep" : attacksHaven ? "haven" : "player";
       }
@@ -3232,8 +3418,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function drawHeroSprite(face: number, dx: number, dy: number, size: number) {
     const current = appearance();
+    const generatedFace = face === 1 ? 2 : face === 2 ? 1 : face;
     if (current === "castaway" || current === "shore") {
-      sheetGrid(imgs[`${HEROES[heroId].sheet}-prologue`], (current === "castaway" ? 0 : 1) * 4 + face, 4, 2, dx, dy, size);
+      sheetGrid(imgs[`${HEROES[heroId].sheet}-prologue`], (current === "castaway" ? 0 : 1) * 4 + generatedFace, 4, 2, dx, dy, size);
       return;
     }
     if (current === "base") {
@@ -3241,7 +3428,26 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       return;
     }
     const row: Record<"armor" | "mage" | "thief" | "pirate", number> = { armor: 0, mage: 1, thief: 2, pirate: 3 };
-    sheetGrid(imgs[`${HEROES[heroId].sheet}-appearances`], row[current] * 4 + face, 4, 4, dx, dy, size);
+    sheetGrid(imgs[`${HEROES[heroId].sheet}-appearances`], row[current] * 4 + generatedFace, 4, 4, dx, dy, size);
+  }
+
+  function drawBoatWorld(x: number, y: number, angle: number, enemy = false, size = 76) {
+    const p = wrld(x, y);
+    const speed = Math.hypot(vx, vy);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(angle - Math.PI * 0.73);
+    ctx.globalAlpha = 0.22 + Math.min(0.22, speed / 500);
+    ctx.fillStyle = enemy ? "#d58a78" : "#b9eee4";
+    ctx.beginPath();
+    ctx.ellipse(-size * 0.18, size * 0.26, size * 0.38, size * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.filter = enemy
+      ? "hue-rotate(150deg) saturate(1.65) brightness(0.76) drop-shadow(0 7px 5px rgba(0,0,0,.55))"
+      : "drop-shadow(0 7px 5px rgba(0,0,0,.55))";
+    sheetGrid(imgs["prologue-world"], 4, 3, 2, -size / 2, -size / 2, size);
+    ctx.restore();
   }
 
   function drawPortal(x: number, y: number) {
@@ -3371,7 +3577,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.fill();
       }
     }
-    if (map === "isle" || map === "shoal") {
+    if (map === "isle" || map === "shoal" || map === "strait") {
       for (let i = 0; i < 3; i++) {
         const x = ((time * (18 + i * 4) + i * 260) % (cssW + 120)) - 60;
         const y = 55 + i * 42 + Math.sin(time + i) * 12;
@@ -3521,14 +3727,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const bar = wrld(SHOAL_BAR.c * TILE - 40, SHOAL_BAR.r * TILE - 60);
       sheetGrid(imgs["prologue-world"], 2, 3, 2, bar.x, bar.y, 112);
 
-      const boat = wrld(SHOAL_BOAT.c * TILE - 42, SHOAL_BOAT.r * TILE - 52);
-      sheetGrid(imgs["prologue-world"], flags.has("raftBuilt") ? 4 : 3, 3, 2, boat.x, boat.y, 108);
-      drawWorldPrompt(
-        SHOAL_BOAT.c * TILE + 16,
-        SHOAL_BOAT.r * TILE + 5,
-        flags.has("raftBuilt") ? (has("mapshard") ? "Отплыть к Вестмеру" : "Сначала взять карту") : "Собрать лодку · 4 дерево · 2 полотно · 1 руда",
-        true,
-      );
+      if (transport !== "boat") {
+        const boat = wrld(SHOAL_BOAT.c * TILE - 42, SHOAL_BOAT.r * TILE - 52);
+        sheetGrid(imgs["prologue-world"], flags.has("raftBuilt") ? 4 : 3, 3, 2, boat.x, boat.y, 108);
+        drawWorldPrompt(
+          SHOAL_BOAT.c * TILE + 16,
+          SHOAL_BOAT.r * TILE + 5,
+          flags.has("raftBuilt") ? (has("mapshard") ? "Встать за штурвал" : "Сначала взять карту") : "Собрать лодку · 4 дерево · 2 полотно · 1 руда",
+          true,
+        );
+      }
     }
 
     if ((map === "hall" && !opened.has("hall:10,3")) || (map === "inn" && !opened.has("inn:3,4")) || (map === "dungeon" && !opened.has("dungeon:3,3"))) {
@@ -3742,9 +3950,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const boss = m.kind === "brine";
       const selected = m.id === huntId;
       const hovered = m.id === hoverMobId;
-      const size = boss ? 68 : 38;
+      const size = boss ? 68 : m.kind === "skiff" ? 72 : 38;
       const bob = m.windup > 0 ? Math.sin(time * 24) * 1.2 : Math.sin(time * 5 + m.id) * 0.7;
-      const s = wrld(m.x - size / 2, m.y - (boss ? 49 : 25) + bob);
+      const s = wrld(m.x - size / 2, m.y - (boss ? 49 : m.kind === "skiff" ? 38 : 25) + bob);
       const feet = wrld(m.x, m.y + (boss ? 9 : 8));
 
       ctx.save();
@@ -3791,7 +3999,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       else if (boss) ctx.filter = "hue-rotate(155deg) saturate(0.72) brightness(0.86) drop-shadow(0 7px 5px rgba(0,0,0,.5))";
       else if (m.kind === "raider") ctx.filter = "hue-rotate(205deg) saturate(1.45) brightness(0.82) drop-shadow(0 5px 4px rgba(0,0,0,.45))";
       else ctx.filter = "drop-shadow(0 5px 4px rgba(0,0,0,.42))";
-      if (m.kind === "crab" || boss) sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, size);
+      if (m.kind === "skiff") {
+        ctx.restore();
+        drawBoatWorld(m.x, m.y - 2 + bob, Math.atan2(py - m.y, px - m.x), true, size);
+        ctx.save();
+      } else if (m.kind === "crab" || boss) sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, size);
       else sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, size);
       ctx.restore();
       if (m.slow > 0) {
@@ -4100,6 +4312,20 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const cx = ps.x + heroSize / 2;
     const cy = ps.y + 27;
     const feet = wrld(px, py + 10);
+    if (transport === "boat") {
+      if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.48;
+      drawBoatWorld(px, py, transportAngle, false, 82);
+      ctx.globalAlpha = 1;
+      const helm = wrld(px, py - 5);
+      ctx.save();
+      ctx.fillStyle = "#f0d58a";
+      ctx.shadowColor = "#f0d58a";
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(helm.x, helm.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
     ctx.save();
     ctx.fillStyle = "rgba(5,7,9,0.42)";
     ctx.beginPath();
@@ -4185,7 +4411,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.stroke();
       ctx.restore();
     }
-    if (lyra) {
+    }
+    if (lyra && transport === "foot") {
       const ls = wrld(px - 28, py - 10);
       sheet(imgs.npcs, 3, ls.x, ls.y, 32);
     }
@@ -4292,6 +4519,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     else dir = dy < 0 ? 3 : 0;
   }
 
+  function aimWorld(wx: number, wy: number) {
+    hasAim = true;
+    aimX = wx;
+    aimY = wy;
+    aimAng = Math.atan2(wy - py, wx - px);
+  }
+
   function interactionTargetAt(wx: number, wy: number) {
     const candidates: { x: number; y: number; d: number }[] = [];
     const consider = (c: number, r: number, radius = 30) => {
@@ -4365,6 +4599,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const mob = mobAt(wx, wy);
     if (mob) {
       huntId = mob.id;
+      if (transport === "boat") {
+        moveTo = null;
+        attack();
+        return;
+      }
       moveTo = { x: mob.x, y: mob.y };
       if (Math.hypot(mob.x - px, mob.y - py) < 42) attack();
       return;
@@ -4381,7 +4620,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function onKeyDown(e: KeyboardEvent) {
     if (e.repeat) return;
     keys.add(e.code);
-    if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
+    if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
     if (mode === "pause") {
       if (e.code === "Escape") {
         mode = "play";
@@ -4417,6 +4656,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     if (e.code === "KeyE") interact();
     if (e.code === "Space" || e.code === "KeyF") attack();
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") dodge();
     if (e.code === "Digit1") cast(0);
     if (e.code === "Digit2") cast(1);
     if (e.code === "Digit3") cast(2);
@@ -4462,7 +4702,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function onPointerMove(e: PointerEvent) {
     const w = worldFromEvent(e);
-    faceWorld(w.x, w.y);
+    // Hovering aims attacks but movement owns the visible facing direction.
+    // This prevents the hero from appearing to run backwards while the cursor sits behind them.
+    aimWorld(w.x, w.y);
     hoverMobId = mode === "play" ? (mobAt(w.x, w.y)?.id ?? 0) : 0;
     canvas.style.cursor = hoverMobId ? "crosshair" : "default";
     if (holdLmb && mode === "play" && !talkGo && !huntId) moveTo = { x: w.x, y: w.y };
@@ -4548,6 +4790,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     },
     keyword: doKeyword,
     attack,
+    dodge,
     cast,
     interact,
     pickTalent(id: TalentId) {
