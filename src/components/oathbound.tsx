@@ -117,6 +117,7 @@ function HudIco({ id }: { id: keyof typeof ICO }) {
 }
 
 const NPC_FACE: Record<string, string> = {
+  noll: "/portraits/ryn.png",
   edric: "/portraits/edric.png",
   bruna: "/portraits/bruna.png",
   ryn: "/portraits/ryn.png",
@@ -130,6 +131,8 @@ const NPC_FACE: Record<string, string> = {
 
 const GUISE_RU = { oath: "клятва", mage: "маг", thief: "вор", pirate: "киль" } as const;
 const APPEARANCE_RU: Record<Snapshot["appearance"], string> = {
+  castaway: "потерпевший крушение",
+  shore: "одежда с берега",
   base: "дорожный комплект",
   armor: "тяжёлый доспех",
   mage: "пепельная роба",
@@ -201,7 +204,7 @@ function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlo
                 : Package;
   const tone = slot
     ? "is-gear"
-    : id === "stormheart" || id === "tide" || id === "codex" || id === "mark"
+    : id === "stormheart" || id === "tide" || id === "codex" || id === "mark" || id === "mapshard"
       ? "is-relic"
       : id === "potion" || id === "food"
         ? "is-consumable"
@@ -224,17 +227,18 @@ function HeroPaperDoll({
 }) {
   const hero = HEROES[heroId];
   const equipped = Object.values(equipment).filter(Boolean).length;
+  const prologue = appearance === "castaway" || appearance === "shore";
   const row = appearance === "armor" ? 0 : appearance === "mage" ? 1 : appearance === "thief" ? 2 : 3;
-  const generated = appearance !== "base";
+  const generated = appearance !== "base" && !prologue;
   return (
     <div className="paper-doll">
       <div className="paper-doll-stage" aria-label={`Полный облик героя: ${APPEARANCE_RU[appearance]}`}>
         <span className="paper-doll-aura" aria-hidden />
         <span
-          className={`paper-doll-base ${generated ? "is-appearance" : "is-base"}`}
+          className={`paper-doll-base ${prologue ? "is-prologue" : generated ? "is-appearance" : "is-base"}`}
           style={{
-            backgroundImage: `url(/sprites/${hero.sheet}${generated ? "-appearances" : ""}.png)`,
-            backgroundPosition: generated ? `0 ${row * (100 / 3)}%` : "0 0",
+            backgroundImage: `url(/sprites/${hero.sheet}${prologue ? "-prologue" : generated ? "-appearances" : ""}.png)`,
+            backgroundPosition: prologue ? `0 ${appearance === "shore" ? 100 : 0}%` : generated ? `0 ${row * (100 / 3)}%` : "0 0",
           }}
           aria-hidden
         />
@@ -369,12 +373,13 @@ function WorldAtlas({
     if (!parent) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const over = MAPS.over;
-    const rows = over.length;
-    const cols = over[0].length;
+    const shoal = snap.you.map === "shoal";
+    const world = shoal ? MAPS.shoal : MAPS.over;
+    const rows = world.length;
+    const cols = world[0].length;
     const cssW = parent.clientWidth;
     const cssH = parent.clientHeight;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.max(1, Math.min(1.5, window.devicePixelRatio || 1, Math.sqrt(1_400_000 / Math.max(1, cssW * cssH))));
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
     canvas.style.width = `${cssW}px`;
@@ -402,18 +407,23 @@ function WorldAtlas({
     };
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        ctx.fillStyle = color[over[r][c]] ?? "#3d5c4a";
+        ctx.fillStyle = color[world[r][c]] ?? "#3d5c4a";
         ctx.fillRect(ox + c * scale, oy + r * scale, Math.ceil(scale + 0.5), Math.ceil(scale + 0.5));
       }
     }
     ctx.font = "11px IBM Plex Mono, monospace";
     ctx.textAlign = "center";
-    for (const m of snap.landmarks) {
-      ctx.fillStyle = "rgba(232,228,216,0.85)";
-      ctx.fillText(m.name, ox + m.c * scale, oy + m.r * scale - 4);
+    if (shoal) {
+      for (const m of [{ name: "Сундук", c: 4, r: 14 }, { name: "Три доски", c: 19, r: 7 }, { name: "Лодка", c: 23, r: 13 }]) {
+        ctx.fillStyle = "rgba(232,228,216,0.88)";
+        ctx.fillText(m.name, ox + m.c * scale, oy + m.r * scale - 5);
+      }
+    } else for (const m of snap.landmarks) {
+        ctx.fillStyle = "rgba(232,228,216,0.85)";
+        ctx.fillText(m.name, ox + m.c * scale, oy + m.r * scale - 4);
     }
     for (const s of snap.sites) {
-      if (s.map !== "over") continue;
+      if (shoal || s.map !== "over") continue;
       const x = ox + s.c * scale;
       const y = oy + s.r * scale;
       ctx.save();
@@ -436,7 +446,7 @@ function WorldAtlas({
       }
       ctx.restore();
     }
-    if (snap.you.map === "over") {
+    if (snap.you.map === (shoal ? "shoal" : "over")) {
       const x = ox + snap.you.c * scale;
       const y = oy + snap.you.r * scale;
       ctx.fillStyle = "#e8e4d8";
@@ -459,9 +469,9 @@ function WorldAtlas({
       </div>
       <aside className="atlas-legend w-44 shrink-0 overflow-auto">
         <p className="font-mono text-xs tracking-widest text-muted">КАРТА</p>
-        <h2 className="mt-1 font-display text-xl">Вестмер</h2>
-            <p className="mt-2 text-xs text-subtle">Белый ромб — ты. Домик — участок, золотой свет означает готовую постройку.</p>
-        <ul className="mt-4">
+        <h2 className="mt-1 font-display text-xl">{snap.you.map === "shoal" ? "Остров Трёх досок" : "Вестмер"}</h2>
+        <p className="mt-2 text-xs text-subtle">{snap.you.map === "shoal" ? "Белый ромб — ты. Подписаны три точки первого пути: одежда, слух и лодка." : "Белый ромб — ты. Домик — участок, золотой свет означает готовую постройку."}</p>
+        {snap.you.map !== "shoal" ? <ul className="mt-4">
           {snap.waypoints.map((w) => (
             <li key={w.id}>
               <button type="button" disabled={!w.unlocked} onClick={() => onTravel(w.id)} className="choice">
@@ -470,7 +480,7 @@ function WorldAtlas({
               </button>
             </li>
           ))}
-        </ul>
+        </ul> : <p className="mt-4 text-xs leading-relaxed text-muted">Сначала собери всё необходимое здесь. Большая карта откроется после первого плавания.</p>}
         <Button className="mt-4" variant="ghost" size="sm" onClick={onClose}>Закрыть</Button>
       </aside>
     </div>
@@ -696,7 +706,7 @@ export function Oathbound() {
                 <p className="font-mono text-xs tracking-[0.28em] text-[#d9b879]">ТАМ, ГДЕ ГОРИТ ОЧАГ, КЛЯТВА ЕЩЁ ЖИВА</p>
                 <h1 className="mt-2 font-display text-4xl font-semibold tracking-wide md:text-6xl">OATHBOUND</h1>
                 <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
-                  Можно идти за украденным Кодексом, а можно вернуться домой: поднять Двор, слушать дождь у огня и готовить стены к тем ночам, когда остров приходит за своим.
+                  Ты приходишь в себя почти без одежды на Острове Трёх досок. Первый сундук даст клинок, первый бар — слух о семи частях карты, а первая лодка откроет путь к Вестмеру, крепости и морским войнам.
                 </p>
                 {snap.canContinue && snap.savePreview ? (
                   <div className="menu-save-card mx-auto mt-5">
@@ -729,8 +739,8 @@ export function Oathbound() {
                       <div className="relative mt-1 flex h-24 items-end justify-center">
                         <span className="absolute bottom-2 h-3 w-16 rounded-full bg-fg/20" aria-hidden />
                         <div
-                          className="hero-sprite"
-                          style={{ backgroundImage: `url(/sprites/${h.sheet}.png)` }}
+                          className="hero-sprite is-prologue"
+                          style={{ backgroundImage: `url(/sprites/${h.sheet}-prologue.png)` }}
                           aria-hidden
                         />
                       </div>

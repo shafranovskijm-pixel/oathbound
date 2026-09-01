@@ -99,7 +99,7 @@ export type GameSave = {
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const HERO_IDS = new Set(["aldric", "vessa", "kael"]);
-const MAP_IDS = new Set(["over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
+const MAP_IDS = new Set(["shoal", "over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
 const MODES = new Set(["play", "talent", "dead", "win"]);
 const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine", "raider"]);
 

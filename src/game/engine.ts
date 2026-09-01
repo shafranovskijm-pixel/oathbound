@@ -27,7 +27,7 @@ import {
 } from "./world";
 
 export type Mode = "menu" | "play" | "pause" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
-export type Appearance = "base" | "armor" | "mage" | "thief" | "pirate";
+export type Appearance = "castaway" | "shore" | "base" | "armor" | "mage" | "thief" | "pirate";
 
 export type CostPart = { id: ItemId; name: string; have: number; need: number; ok: boolean };
 
@@ -206,7 +206,7 @@ const STACKABLE_ITEMS = new Set<ItemId>([
   "shell",
 ]);
 
-const AUTO_EQUIP_ITEMS = new Set<ItemId>(["steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail", "tidehelm", "havenhood", "saltvisor", "firecrown"]);
+const AUTO_EQUIP_ITEMS = new Set<ItemId>(["shiv", "rags", "steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail", "tidehelm", "havenhood", "saltvisor", "firecrown"]);
 
 const HEARTH_STORIES = [
   "Дождь стучит по новой крыше. Впервые за долгое время этот звук не похож на погоню.",
@@ -216,6 +216,11 @@ const HEARTH_STORIES = [
   "В башне звенит приливный камень. Море далеко, но его дыхание уже поселилось в стенах.",
   "На рассвете у ворот находят связку сухих трав. Никто из дозорных не видел, кто её принёс.",
 ];
+
+const SHOAL_WRECK = { c: 4, r: 14 };
+const SHOAL_BOAT = { c: 23, r: 13 };
+const SHOAL_BAR = { c: 19, r: 7 };
+const SHOAL_BOAT_NEEDS: ItemId[] = ["wood", "wood", "wood", "wood", "cloth", "cloth", "ore"];
 
 const SITE_VISUAL: Record<SiteId, number> = {
   grove: 0,
@@ -354,9 +359,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   let mode: Mode = "menu";
   let heroId: HeroId = "aldric";
-  let map: MapId = "over";
-  let px = SPAWN.over.c * TILE + 16;
-  let py = SPAWN.over.r * TILE + 16;
+  let map: MapId = "shoal";
+  let px = SPAWN.shoal.c * TILE + 16;
+  let py = SPAWN.shoal.r * TILE + 16;
   let vx = 0;
   let vy = 0;
   let dir = 0;
@@ -467,6 +472,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function seedMobs() {
     mobs = [
+      mkMob("shoal", 14, 13, "crab"),
       mkMob("over", 10, 14, "wolf"),
       mkMob("over", 8, 26, "wolf"),
       mkMob("over", 20, 12, "wolf"),
@@ -511,7 +517,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -582,6 +588,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function appearance(): Appearance {
+    if (!worn.arm && !worn.cloak && !worn.helm) return "castaway";
+    if (worn.arm === "rags" && !worn.cloak && !worn.helm) return "shore";
     if (worn.cloak === "sash" || worn.cloak === "stormcloak" || worn.wep === "harpoon") return "pirate";
     if (worn.cloak === "robe" || worn.helm === "firecrown") return "mage";
     if (worn.cloak === "shroud") return "thief";
@@ -870,6 +878,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function quests() {
     const eiraKills = Math.min(4, islandCrabKills());
     return [
+      { text: "Обыскать разбитый сундук и одеться", done: opened.has("shoal-wreck") },
+      { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
+      { text: "Собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
+      { text: "Покинуть Остров Трёх досок", done: flags.has("leftShoal") },
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
       { text: "Поднять Двор клятвы (юг от дороги)", done: flags.has("keep") },
       { text: "Взять факел у Бруны", done: has("torch") },
@@ -905,6 +917,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function journeyHint() {
+    if (!flags.has("leftShoal")) {
+      if (!opened.has("shoal-wreck")) return "Цель: осмотри разбитый сундук на западном пляже — там первая одежда, клинок и несколько монет.";
+      if (!has("mapshard")) return "Цель: зайди в бар «Три доски» на севере тропы и купи у Нолла первый обрывок карты за 3 золота.";
+      if (!flags.has("raftBuilt")) return "Цель: собери 4 дерева, 2 полотна и 1 руду. Каркас лодки ждёт на восточном пляже.";
+      return "Цель: кликни по готовой лодке и отплывай к Вестмеру. Первый обрывок карты уже у тебя.";
+    }
     if (!flags.has("metLord")) return "Цель: найди Халрика в северном зале Вестмера. Открой карту — M.";
     if (!flags.has("keep")) return "Цель: подними Двор клятвы к югу от дороги. Участок светится на карте — M.";
     if (!has("torch")) return "Цель: возьми факел у Бруны в таверне «Соль».";
@@ -1311,7 +1329,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function emit(force = false) {
-    if (!force && time - lastEmit < 0.08) return;
+    // Canvas animation stays on requestAnimationFrame; React HUD snapshots do not
+    // need to rebuild the entire interface more than six times per second.
+    if (!force && time - lastEmit < 0.16) return;
     lastEmit = time;
     persistGame(force);
     onChange(snapshot());
@@ -1387,9 +1407,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function reset(id: HeroId) {
     const h = HEROES[id];
     heroId = id;
-    map = "over";
-    px = SPAWN.over.c * TILE + 16;
-    py = SPAWN.over.r * TILE + 16;
+    map = "shoal";
+    px = SPAWN.shoal.c * TILE + 16;
+    py = SPAWN.shoal.r * TILE + 16;
     vx = 0;
     vy = 0;
     dir = 0;
@@ -1397,18 +1417,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     hp = h.hp;
     maxMp = h.mp;
     mp = h.mp;
-    food = 18;
-    gold = 16;
+    food = 9;
+    gold = 0;
     xp = 0;
     level = 1;
     str = h.str;
     baseSpd = h.spd;
     baseArmor = h.armor;
     items.length = 0;
-    if (id !== "vessa") items.push("sword");
-    items.push("leather", "wood", "herb");
-    worn.wep = id === "vessa" ? null : "sword";
-    worn.arm = "leather";
+    worn.wep = null;
+    worn.arm = null;
     worn.cloak = null;
     worn.helm = null;
     lyra = false;
@@ -1432,7 +1450,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     lastAsk = "";
     mode = "play";
     log.length = 0;
-    log.push(`${h.name} на дороге. Юг — руина Двора. E — говорить и исследовать.`);
+    log.push(`${h.name} приходит в себя на Острове Трёх досок. На тебе только морская соль и бинты.`);
+    log.push("Осмотри разбитый сундук у западной кромки. Всё, с чем можно взаимодействовать, отмечено руной.");
     cam.x = px;
     cam.y = py;
     sparks.length = 0;
@@ -1548,6 +1567,22 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       gold -= shop.gold;
       give(shop.item);
       talkText = `«${ITEM[shop.item].name}. Минус ${shop.gold} золота.»`;
+      emit(true);
+      return;
+    }
+    if (n.id === "noll" && key === "MAP") {
+      if (has("mapshard")) {
+        talkText = "«Первый край у тебя. Остальные носят люди, которые добровольно бумагу не отдают.»";
+      } else if (gold < 3) {
+        talkText = "«Три монеты. Разбитый сундук на западе иногда выплёвывает золото вместе с мёртвыми надеждами.»";
+      } else {
+        gold -= 3;
+        give("mapshard");
+        flags.add("firstMapShard");
+        talkText = "«Капитан Мор разделил путь к Чаше Бездонного прилива на семь частей. Теперь одна из них выбирает тебя.»";
+        say("Первый обрывок карты получен. Ещё шесть потеряны среди портов, капитанов и будущих врагов.");
+        audio.ok();
+      }
       emit(true);
       return;
     }
@@ -1697,7 +1732,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return keepRegen * 0.35 + (worn.cloak === "stormcloak" ? 0.15 : 0);
   }
   function meleeBase() {
-    let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
+    let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : worn.wep === "shiv" ? 2 : heroId === "vessa" ? 1 : 2);
     if (islandMap() && activeHavenChoice() === "stormfire") d += 3;
     if (worn.helm === "firecrown") d += 2;
     return d + keepDmg;
@@ -1713,6 +1748,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
   function itemEffects(id: ItemId) {
     switch (id) {
+      case "shiv": return ["+2 урон оружия", "первый береговой клинок"];
+      case "rags": return ["первый матросский облик"];
+      case "mapshard": return ["1 из 7 частей карты Мора"];
       case "sword": return ["+3 урон оружия"];
       case "steel": return ["+5 урон оружия"];
       case "harpoon": return ["+7 урон оружия", "дальность удара 62"];
@@ -2105,6 +2143,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       for (let i = 0; i < amount; i++) give(node.item);
       say(`${node.label}. +${amount} · ${ITEM[node.item].name}.`);
       burst(node.c * TILE + 16, node.r * TILE + 16, "#d8d0a8", 12);
+    } else if (map === "shoal" && Math.abs(tileC() - SHOAL_WRECK.c) + Math.abs(tileR() - SHOAL_WRECK.r) <= 1 && !opened.has("shoal-wreck")) {
+      opened.add("shoal-wreck");
+      spawnGroundItem("rags", px + 11, py - 4);
+      spawnGroundItem("shiv", px - 9, py + 5);
+      spawnLoot(px, py, 7);
+      say("В сундуке: рваная матросская одежда, обломок сабли и семь золотых. Подними всё с песка.");
+      burst(SHOAL_WRECK.c * TILE + 16, SHOAL_WRECK.r * TILE + 16, "#d8c070", 20);
     } else if (map === "hall" && tileC() === 10 && tileR() === 3 && !opened.has(id)) {
       opened.add(id);
       spawnLoot(px, py, 30);
@@ -2143,6 +2188,35 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return true;
   }
 
+  function handleShoalBoat() {
+    if (map !== "shoal") return false;
+    const distance = Math.hypot(SHOAL_BOAT.c * TILE + 16 - px, SHOAL_BOAT.r * TILE + 16 - py);
+    if (distance > 48) return false;
+    if (!flags.has("raftBuilt")) {
+      if (!hasNeeds(SHOAL_BOAT_NEEDS)) {
+        const missing = itemNeeds(SHOAL_BOAT_NEEDS).filter((part) => !part.ok).map((part) => `${part.name} ${part.have}/${part.need}`).join(" · ");
+        say(`Лодка не готова. Не хватает: ${missing}. Все нужные места подсвечены на острове.`);
+        emit(true);
+        return true;
+      }
+      spendNeeds(SHOAL_BOAT_NEEDS);
+      flags.add("raftBuilt");
+      say("Лодка готова. Доски связаны, парус держит ветер, камень лёг в днище. Осталось забрать обрывок карты у Нолла.");
+      burst(SHOAL_BOAT.c * TILE + 16, SHOAL_BOAT.r * TILE + 16, "#9ed8d0", 28);
+      audio.ok();
+      emit(true);
+      return true;
+    }
+    if (!has("mapshard")) {
+      say("Без слуха и карты это просто побег в случайную сторону. Сначала поговори с Ноллом в баре «Три доски». ");
+      emit(true);
+      return true;
+    }
+    flags.add("leftShoal");
+    warp("over", SPAWN.over.c, SPAWN.over.r, "Первый парус выдержал. Впереди Вестмер — земля, где ещё шесть частей карты могут стоить дружбы, золота или крови.");
+    return true;
+  }
+
   function interact() {
     if (mode !== "play") return;
     const groundItem = nearestGroundItem();
@@ -2155,6 +2229,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       startTalk(n);
       return;
     }
+    if (handleShoalBoat()) return;
     const plot = siteAt(map, tileC(), tileR());
     if (plot) {
       const pick = raised.get(plot.id);
@@ -2562,7 +2637,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (map === "keep" && built.has("hearth")) {
       audio.setAmbience("fire");
       if (Math.random() < dt * 2.2) audio.crackle();
-    } else if (map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
+    } else if (map === "shoal" || map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
       audio.setAmbience("sea");
     } else audio.setAmbience("none");
     for (const k of Object.keys(cds)) cds[k] = Math.max(0, cds[k] - dt);
@@ -3157,11 +3232,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function drawHeroSprite(face: number, dx: number, dy: number, size: number) {
     const current = appearance();
+    if (current === "castaway" || current === "shore") {
+      sheetGrid(imgs[`${HEROES[heroId].sheet}-prologue`], (current === "castaway" ? 0 : 1) * 4 + face, 4, 2, dx, dy, size);
+      return;
+    }
     if (current === "base") {
       sheet(imgs[HEROES[heroId].sheet], face, dx, dy, size);
       return;
     }
-    const row: Record<Exclude<Appearance, "base">, number> = { armor: 0, mage: 1, thief: 2, pirate: 3 };
+    const row: Record<"armor" | "mage" | "thief" | "pirate", number> = { armor: 0, mage: 1, thief: 2, pirate: 3 };
     sheetGrid(imgs[`${HEROES[heroId].sheet}-appearances`], row[current] * 4 + face, 4, 4, dx, dy, size);
   }
 
@@ -3292,7 +3371,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.fill();
       }
     }
-    if (map === "isle") {
+    if (map === "isle" || map === "shoal") {
       for (let i = 0; i < 3; i++) {
         const x = ((time * (18 + i * 4) + i * 260) % (cssW + 120)) - 60;
         const y = 55 + i * 42 + Math.sin(time + i) * 12;
@@ -3413,7 +3492,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillStyle = "rgba(8,12,28,0.32)";
       ctx.fillRect(0, 0, cssW, cssH);
     }
-    if (map === "isle") {
+    if (map === "isle" || map === "shoal") {
       ctx.fillStyle = "rgba(150,182,176,0.08)";
       ctx.fillRect(0, 0, cssW, cssH);
       ctx.save();
@@ -3433,6 +3512,24 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillRect(0, 0, cssW, cssH);
     }
     drawAmbientLife();
+
+    if (map === "shoal") {
+      const wreck = wrld(SHOAL_WRECK.c * TILE - 32, SHOAL_WRECK.r * TILE - 48);
+      sheetGrid(imgs["prologue-world"], 0, 3, 2, wreck.x, wreck.y, 96);
+      if (!opened.has("shoal-wreck")) drawWorldPrompt(SHOAL_WRECK.c * TILE + 16, SHOAL_WRECK.r * TILE + 2, "Обыскать сундук", true);
+
+      const bar = wrld(SHOAL_BAR.c * TILE - 40, SHOAL_BAR.r * TILE - 60);
+      sheetGrid(imgs["prologue-world"], 2, 3, 2, bar.x, bar.y, 112);
+
+      const boat = wrld(SHOAL_BOAT.c * TILE - 42, SHOAL_BOAT.r * TILE - 52);
+      sheetGrid(imgs["prologue-world"], flags.has("raftBuilt") ? 4 : 3, 3, 2, boat.x, boat.y, 108);
+      drawWorldPrompt(
+        SHOAL_BOAT.c * TILE + 16,
+        SHOAL_BOAT.r * TILE + 5,
+        flags.has("raftBuilt") ? (has("mapshard") ? "Отплыть к Вестмеру" : "Сначала взять карту") : "Собрать лодку · 4 дерево · 2 полотно · 1 руда",
+        true,
+      );
+    }
 
     if ((map === "hall" && !opened.has("hall:10,3")) || (map === "inn" && !opened.has("inn:3,4")) || (map === "dungeon" && !opened.has("dungeon:3,3"))) {
       const chests = map === "hall" ? [[10, 3]] : map === "inn" ? [[3, 4]] : [[3, 3]];
@@ -3466,7 +3563,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (const node of GATHER_NODES) {
       if (node.map !== map || opened.has(`node:${node.id}`)) continue;
       const p = wrld(node.c * TILE, node.r * TILE - 7);
-      sheetGrid(imgs.items, node.sprite, 3, 3, p.x, p.y, 32);
+      if (node.map === "shoal" && node.item === "wood") sheetGrid(imgs["prologue-world"], 1, 3, 2, p.x - 8, p.y - 12, 48);
+      else sheetGrid(imgs.items, node.sprite, 3, 3, p.x, p.y, 32);
       drawInteractionPulse(node.c * TILE + 16, node.r * TILE + 16, node.label, true);
     }
     for (const s of SITES) {
@@ -4164,7 +4262,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const parent = canvas.parentElement ?? canvas;
     cssW = Math.max(1, parent.clientWidth);
     cssH = Math.max(1, parent.clientHeight);
-    dpr = Math.min(2, window.devicePixelRatio || 1);
+    // Pixel art remains crisp at a modest DPR. A physical-pixel budget prevents
+    // 1440p/4K browsers from redrawing millions of invisible subpixels every frame.
+    const nativeDpr = Math.min(1.75, window.devicePixelRatio || 1);
+    const budgetDpr = Math.sqrt(2_200_000 / Math.max(1, cssW * cssH));
+    dpr = Math.max(1, Math.min(nativeDpr, budgetDpr));
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
     canvas.style.width = `${cssW}px`;
@@ -4219,6 +4321,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (map === "over" && !has("mark")) consider(26, 7, 34);
     if (map === "crypt" && !has("codex")) consider(8, 2, 34);
     if (map === "isle" && !opened.has("isle-chest")) consider(28, 6, 34);
+    if (map === "shoal") {
+      if (!opened.has("shoal-wreck")) consider(SHOAL_WRECK.c, SHOAL_WRECK.r, 44);
+      consider(SHOAL_BOAT.c, SHOAL_BOAT.r, 52);
+    }
     return candidates.reduce<(typeof candidates)[number] | null>((best, candidate) => (!best || candidate.d < best.d ? candidate : best), null);
   }
 

@@ -463,6 +463,10 @@
   background-size: 400% 400%;
 }
 
+.paper-doll-base.is-prologue {
+  background-size: 400% 200%;
+}
+
 .paper-doll-layer {
   z-index: 3;
   overflow: visible;
@@ -1166,6 +1170,10 @@
   animation: hero-turn 3.2s steps(1) infinite;
   filter: drop-shadow(0 6px 0 rgb(10 12 16 / 0.45));
 }
+.hero-sprite.is-prologue {
+  background-size: 400% 200%;
+  animation-name: hero-shore-turn;
+}
 .group:hover .hero-sprite {
   animation-duration: 0.9s;
 }
@@ -1182,6 +1190,13 @@
   75% {
     background-position: 100% 100%;
   }
+}
+
+@keyframes hero-shore-turn {
+  0% { background-position: 0% 0%; }
+  25% { background-position: 33.333% 0%; }
+  50% { background-position: 66.666% 0%; }
+  75%, 100% { background-position: 100% 0%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-sprite {

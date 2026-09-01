@@ -1,6 +1,9 @@
 import type { MapId } from "./world";
 
 export type ItemId =
+  | "shiv"
+  | "rags"
+  | "mapshard"
   | "sword"
   | "steel"
   | "leather"
@@ -33,11 +36,14 @@ export type ItemId =
   | "firecrown"
   | "keelsigil";
 
-export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn" | "eira";
+export type NpcId = "noll" | "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn" | "eira";
 export type Slot = "wep" | "arm" | "cloak" | "helm";
 export type Guise = "oath" | "mage" | "thief" | "pirate";
 
 export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> = {
+  shiv: { name: "Обломок абордажной сабли", desc: "Половина клинка. Для первого краба хватит.", slot: "wep" },
+  rags: { name: "Одежда с разбитого шлюпа", desc: "Рваная рубаха, жилет и сухая верёвка вместо пояса.", slot: "arm" },
+  mapshard: { name: "Первый обрывок карты", desc: "Край семичастной карты капитана Мора. В углу — знак чаши без дна." },
   sword: { name: "Ржавый меч", desc: "Держит удар. Пока.", slot: "wep" },
   steel: { name: "Стальной меч", desc: "Честная сталь.", slot: "wep" },
   leather: { name: "Кожа", desc: "Лучше, чем рубаха.", slot: "arm" },
@@ -82,6 +88,21 @@ export type Npc = {
 };
 
 export const NPCS: Npc[] = [
+  {
+    id: "noll",
+    name: "Нолл Три Доски",
+    map: "shoal",
+    c: 19,
+    r: 8,
+    sprite: 2,
+    words: {
+      NAME: "Нолл. Когда шторм забрал мою таверну, я построил другую из трёх досок и упрямства.",
+      JOB: "Наливаю дождевую воду, считаю прибой и покупаю истории у тех, кого море выплюнуло живыми.",
+      RUMOR: "Капитан Мор разорвал карту к Чаше Бездонного прилива на семь частей. Один обрывок дошёл до моей стойки.",
+      MAP: "Три золотых. Не за бумагу — за знание, почему ещё шестеро будут охотиться за тобой.",
+      BOAT: "Четыре плавника, две полосы парусины и камень для балласта. Каркас ждёт на восточном пляже.",
+    },
+  },
   {
     id: "halric",
     name: "Халрик",
@@ -237,6 +258,7 @@ export const NPCS: Npc[] = [
 ];
 
 export const ROLE: Record<NpcId, string> = {
+  noll: "хозяин бара «Три доски»",
   halric: "лорд Вестмера",
   edric: "стража ворот",
   bruna: "хозяйка «Соли»",
@@ -249,6 +271,12 @@ export const ROLE: Record<NpcId, string> = {
 };
 
 export const GREET: Record<NpcId, Record<Guise, string>> = {
+  noll: {
+    oath: "«Живой? Тогда уже должен морю. Подойди к стойке — расскажу, как выбраться и во что ты вляпался.»",
+    mage: "«Пепел, соль — всё смывается одинаково. Подойди: у меня есть карта и нет привычки давать её даром.»",
+    thief: "«Карманы пустые, а взгляд уже считает мои монеты. Значит, точно выживешь. Подойди.»",
+    pirate: "«Кушак когда-нибудь появится. Пока ты просто мокрый человек с большими планами. Подойди.»",
+  },
   edric: {
     oath: "«Стой. Город ещё живой, пока я стою. Кто ты — и зачем клинок.»",
     mage: "«Роба. Маги ходят без стука. Ладно. Зал на севере, если Халрик звал.»",
@@ -343,6 +371,8 @@ export const ASK: Record<string, string> = {
   JOIN: "Возьми меня в отряд",
   FOOD: "Купить паёк (6 зол.)",
   RUMOR: "Что слышно вокруг?",
+  MAP: "Купить обрывок карты (3 зол.)",
+  BOAT: "Как построить лодку?",
   HEAL: "Купить зелье (18 зол.)",
   SPELL: "Как бить магией?",
   HALL: "Где зал лорда?",
@@ -387,6 +417,8 @@ export const KEY_RU: Record<string, string> = {
   JOIN: "В ОТРЯД",
   FOOD: "ЕДА",
   RUMOR: "СЛУХИ",
+  MAP: "КАРТА",
+  BOAT: "ЛОДКА",
   HEAL: "ЗЕЛЬЕ",
   SPELL: "МАГИЯ",
   HALL: "ЗАЛ",
