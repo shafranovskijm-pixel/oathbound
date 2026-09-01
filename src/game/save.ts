@@ -34,6 +34,17 @@ export type SavedRaid = {
   towerCd: number;
 };
 
+export type SavedKeepDefense = {
+  active: boolean;
+  wave: number;
+  hp: number;
+  maxHp: number;
+  nextWave: number;
+  towerCd: number;
+  day: number;
+  wins: number;
+};
+
 export type SavedGroundItem = {
   id: number;
   map: MapId;
@@ -47,6 +58,7 @@ export type GameSave = {
   updatedAt: number;
   worldTime?: number;
   raid?: SavedRaid;
+  keepDefense?: SavedKeepDefense;
   mode: SavedMode;
   heroId: HeroId;
   map: MapId;
@@ -137,6 +149,14 @@ function validRaid(value: unknown) {
   );
 }
 
+function validKeepDefense(value: unknown) {
+  if (!record(value)) return false;
+  return (
+    typeof value.active === "boolean" &&
+    [value.wave, value.hp, value.maxHp, value.nextWave, value.towerCd, value.day, value.wins].every(finite)
+  );
+}
+
 function validGroundItem(value: unknown) {
   if (!record(value)) return false;
   return (
@@ -157,6 +177,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     if (value.version !== SAVE_VERSION || !finite(value.updatedAt)) return null;
     if (value.worldTime !== undefined && !finite(value.worldTime)) return null;
     if (value.raid !== undefined && !validRaid(value.raid)) return null;
+    if (value.keepDefense !== undefined && !validKeepDefense(value.keepDefense)) return null;
     if (typeof value.mode !== "string" || !MODES.has(value.mode)) return null;
     if (typeof value.heroId !== "string" || !HERO_IDS.has(value.heroId)) return null;
     if (typeof value.map !== "string" || !MAP_IDS.has(value.map)) return null;

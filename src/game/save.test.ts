@@ -36,6 +36,7 @@ const BASE: GameSave = {
   fieldPortal: null,
   vaultVisit: false,
   raid: { active: true, wave: 2, havenHp: 64, maxHavenHp: 110, nextWave: 0, towerCd: 0.8 },
+  keepDefense: { active: false, wave: 0, hp: 90, maxHp: 90, nextWave: 0, towerCd: 0, day: 3, wins: 1 },
   log: ["Начало"],
   activeSlot: 0,
   mobs: [],
@@ -61,6 +62,7 @@ test("corrupt and incompatible saves fail closed", () => {
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, hp: "many" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, map: "nowhere" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, raid: { active: true, wave: "two" } })), null);
+  assert.equal(decodeGameSave(JSON.stringify({ ...BASE, keepDefense: { active: true, wave: "two" } })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, groundItems: [{ id: 1, map: "void", x: 0, y: 0, item: "hide" }] })), null);
 });
 
@@ -83,4 +85,11 @@ test("saves from before ground loot still load", () => {
   const decoded = decodeGameSave(JSON.stringify(legacy));
   assert.ok(decoded);
   assert.equal(decoded.groundItems, undefined);
+});
+
+test("saves from before courtyard defense still load", () => {
+  const { keepDefense: _keepDefense, ...legacy } = BASE;
+  const decoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(decoded);
+  assert.equal(decoded.keepDefense, undefined);
 });

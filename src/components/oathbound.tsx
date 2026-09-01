@@ -1,13 +1,16 @@
 import {
   ArrowRight,
+  Castle,
   Check,
   Coins,
   Crown,
+  Flame,
   FlaskConical,
   Hammer,
   Leaf,
   LockKeyhole,
   Menu,
+  MoonStar,
   Package,
   ScrollText,
   Shield,
@@ -66,6 +69,7 @@ const IDLE: Snapshot = {
   tide: null,
   haven: null,
   raid: null,
+  fortress: null,
   guise: "oath",
   appearance: "base",
   goldFlash: 0,
@@ -77,6 +81,7 @@ const IDLE: Snapshot = {
   nearSite: null,
   landmarks: [],
   canContinue: false,
+  savePreview: null,
 };
 
 const ICO: Record<SpellId | "melee" | "portal" | "bag" | "gold" | "food" | "keep" | "way", number> = {
@@ -135,6 +140,14 @@ const TIER_RU = { 1: "I · основа", 2: "II · хозяйство", 3: "III
 const SLOT_RU: Record<EquipmentSlot, string> = { wep: "Оружие", arm: "Броня", cloak: "Плащ", helm: "Шлем" };
 const HP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].hp));
 const MP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].mp));
+
+function saveDate(value: number) {
+  try {
+    return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(value);
+  } catch {
+    return "недавнее сохранение";
+  }
+}
 
 function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlot; size?: "sm" | "md" | "lg" }) {
   const Icon = slot === "wep"
@@ -530,8 +543,18 @@ export function Oathbound() {
           </div>
         ) : null}
 
+        {playing && snap.fortress?.active ? (
+          <div className="fortress-hud absolute top-3 left-1/2 w-[min(25rem,52vw)] -translate-x-1/2 px-4 py-2 hud-ink">
+            <div className="flex items-center justify-between gap-3 font-mono text-[10px] tracking-widest">
+              <span className="flex items-center gap-1.5 text-[#f0d58a]"><Castle className="size-3.5" /> ДОЗОР · {snap.fortress.status}</span>
+              <span className="tabular-nums text-muted">{Math.ceil(snap.fortress.hp)}/{snap.fortress.maxHp}</span>
+            </div>
+            <div className="stat-bar mt-1.5 h-2"><i className="fortress-health" style={{ width: `${Math.max(0, (snap.fortress.hp / snap.fortress.maxHp) * 100)}%` }} /></div>
+          </div>
+        ) : null}
+
         {playing && snap.mode === "play" && snap.target ? (
-          <aside className={`target-card absolute left-1/2 -translate-x-1/2 ${snap.raid?.active || snap.target.kind === "brine" ? "top-16" : "top-3"}`}>
+          <aside className={`target-card absolute left-1/2 -translate-x-1/2 ${snap.raid?.active || snap.fortress?.active || snap.target.kind === "brine" ? "top-16" : "top-3"}`}>
             <MobPortrait kind={snap.target.kind} />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">
@@ -604,20 +627,27 @@ export function Oathbound() {
         ) : null}
 
         {snap.mode === "menu" ? (
-          <div className="absolute inset-0 flex items-center justify-center p-3 md:p-8 pointer-events-auto overflow-auto hud-ink">
-            <div className="w-full max-w-5xl py-6">
+          <div className="oath-menu absolute inset-0 flex items-center justify-center p-3 md:p-8 pointer-events-auto overflow-auto hud-ink">
+            <span className="menu-embers" aria-hidden />
+            <div className="relative w-full max-w-5xl py-6">
               <header className="mb-7 text-center">
-                <p className="font-mono text-xs tracking-[0.35em] text-muted">ДВОР · КОДЕКС · КИЛЬ</p>
+                <p className="font-mono text-xs tracking-[0.28em] text-[#d9b879]">ТАМ, ГДЕ ГОРИТ ОЧАГ, КЛЯТВА ЕЩЁ ЖИВА</p>
                 <h1 className="mt-2 font-display text-4xl font-semibold tracking-wide md:text-6xl">OATHBOUND</h1>
-                <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-                  Верни украденный Кодекс, подними свой Двор и реши, какой клятве принадлежит твоё имя.
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
+                  Можно идти за украденным Кодексом, а можно вернуться домой: поднять Двор, слушать дождь у огня и готовить стены к тем ночам, когда остров приходит за своим.
                 </p>
-                {snap.canContinue ? (
-                  <Button className="mt-5 min-w-56" onClick={() => g.current?.continueGame()}>
-                    Продолжить
-                  </Button>
+                {snap.canContinue && snap.savePreview ? (
+                  <div className="menu-save-card mx-auto mt-5">
+                    <img src={`/portraits/${snap.savePreview.heroId}.png`} alt="" className="menu-save-portrait" />
+                    <div className="min-w-0 text-left">
+                      <p className="font-mono text-[10px] tracking-[0.2em] text-[#d9b879]">ПРОДОЛЖИТЬ КЛЯТВУ</p>
+                      <h2 className="mt-1 truncate font-display text-2xl font-semibold">{snap.savePreview.hero} · уровень {snap.savePreview.level}</h2>
+                      <p className="mt-1 text-xs text-muted">{snap.savePreview.place} · Двор {snap.savePreview.built}/6 · {saveDate(snap.savePreview.updatedAt)}</p>
+                    </div>
+                    <Button onClick={() => g.current?.continueGame()}>Вернуться к очагу</Button>
+                  </div>
                 ) : null}
-                <p className="mt-5 font-mono text-xs tracking-widest text-subtle">{snap.canContinue ? "НОВАЯ ИГРА" : "ВЫБЕРИ ГЕРОЯ"}</p>
+                <div className="menu-choice-divider"><span>{snap.canContinue ? "ИЛИ НОВАЯ КЛЯТВА" : "ВЫБЕРИ ГЕРОЯ"}</span></div>
               </header>
               <div className="grid gap-8 md:grid-cols-3">
                 {HERO_LIST.map((id) => {
@@ -807,6 +837,28 @@ export function Oathbound() {
                 </div>
                 <button type="button" className="icon-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
               </header>
+              {snap.inKeep && snap.fortress ? (
+                <section className="fortress-card mt-5">
+                  <div className="fortress-card-head">
+                    <span className="fortress-seal"><Castle /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-[10px] tracking-[0.2em] text-[#d9b879]">ЖИЗНЬ ДВОРА · ДЕНЬ {snap.fortress.day}</p>
+                      <h3 className="mt-1 font-display text-xl font-semibold">{snap.fortress.status}</h3>
+                    </div>
+                    <div className="fortress-metrics">
+                      <span><Shield /> защита <b>{snap.fortress.defense}</b></span>
+                      <span><MoonStar /> ночей <b>{snap.fortress.wins}</b></span>
+                    </div>
+                  </div>
+                  <div className="fortress-wall"><i style={{ width: `${Math.max(0, (snap.fortress.hp / snap.fortress.maxHp) * 100)}%` }} /></div>
+                  <blockquote className="fortress-story"><Flame /> <span>{snap.fortress.story}</span></blockquote>
+                  <p className="fortress-help">Башня и казармы бьют налётчиков сами. Ты можешь помогать в бою — или остаться у очага и посмотреть, выдержит ли построенный тобой Двор.</p>
+                  <div className="fortress-actions">
+                    <Button variant="ghost" onClick={() => g.current?.tendHearth()}><Flame /> Сесть у очага</Button>
+                    <Button disabled={!snap.fortress.canStart} onClick={() => g.current?.startKeepDefense()}><MoonStar /> Ночной дозор · −4 силы</Button>
+                  </div>
+                </section>
+              ) : null}
               {snap.inKeep ? (
                 <ul className="mt-5 grid gap-2 md:grid-cols-3">
                   {snap.buildings.map((b) => (
