@@ -10,7 +10,7 @@ import {
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, LORE_FINDS, SITES, gatherNodeAt, loreFindAt, siteAt, type SiteId } from "./data";
-import { readGameSave, writeGameSave, type GameSave, type SavedKeepDefense, type SavedMode, type SavedRaid, type SavedTransport } from "./save";
+import { readGameSave, writeGameSave, type GameSave, type SavedCampDefense, type SavedKeepDefense, type SavedMode, type SavedRaid, type SavedTransport } from "./save";
 import {
   EXITS,
   MAP_SIZE,
@@ -111,6 +111,20 @@ export type Snapshot = {
     story: string;
     canStart: boolean;
   } | null;
+  camp: {
+    active: boolean;
+    wave: number;
+    hp: number;
+    maxHp: number;
+    nextWave: number;
+    day: number;
+    wins: number;
+    defense: number;
+    status: string;
+    story: string;
+    canStart: boolean;
+    canRepair: boolean;
+  } | null;
   guise: Guise;
   appearance: Appearance;
   goldFlash: number;
@@ -178,6 +192,8 @@ export type GameHandle = {
   rest: () => void;
   tendHearth: () => void;
   startKeepDefense: () => void;
+  startCampDefense: () => void;
+  repairCamp: () => void;
   toggleInv: () => void;
   toggleJournal: () => void;
   usePotion: () => void;
@@ -222,6 +238,14 @@ const HEARTH_STORIES = [
   "Из кузницы тянет углём и горячим железом. Двор снова пахнет работой, а не пеплом.",
   "В башне звенит приливный камень. Море далеко, но его дыхание уже поселилось в стенах.",
   "На рассвете у ворот находят связку сухих трав. Никто из дозорных не видел, кто её принёс.",
+];
+
+const CAMP_STORIES = [
+  "Нолл оставляет у костра кружку без ручки. «Дом начинается не со стен, а с вещи, которую жалко бросить». Можно не соглашаться — кружка всё равно остаётся.",
+  "В парусном крове сухо пахнет солью и старой смолой. На синей заплате кто-то вышил семь точек — столько частей было у карты Мора.",
+  "Между складом и верстаком протоптана первая настоящая дорожка. Остров уже не выглядит местом, где просто ждут спасения.",
+  "С дозорной мачты видно огоньки далеко за рифами. Один гаснет, другой отвечает. Кто-то знает, что на острове снова живут.",
+  "Прилив постукивает лодкой о сваи причала. Ровный звук делает море меньше, а ночь — короче.",
 ];
 
 const SHOAL_WRECK = { c: 4, r: 14 };
@@ -271,8 +295,9 @@ type Mob = {
   flash: number;
   windup: number;
   windupMax: number;
-  attackTarget: "player" | "haven" | "keep";
+  attackTarget: "player" | "haven" | "keep" | "camp";
   guard: number;
+  campUnit: boolean;
 };
 type Shot = {
   x: number;
@@ -422,6 +447,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let vaultVisit = false;
   let raid: SavedRaid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
   let keepDefense: SavedKeepDefense = { active: false, wave: 0, hp: 70, maxHp: 70, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
+  let campDefense: SavedCampDefense = { active: false, wave: 0, hp: 60, maxHp: 60, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
   const log: string[] = [];
   let hint = "WASD ход · E действие · Пробел удар · Shift уворот · 1 2 3 магия";
   let talkNpc: Npc | null = null;
@@ -495,6 +521,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       windupMax: 0,
       attackTarget: "player",
       guard: kind === "crab" ? 1 : 0,
+      campUnit: false,
     };
   }
 
@@ -746,6 +773,129 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     audio.ok();
   }
 
+  function liveCampRaiders() {
+    return mobs.filter((mob) => mob.map === "shoal" && mob.campUnit && mob.hp > 0);
+  }
+
+  function campMaxHp() {
+    return 48
+      + (built.has("shorefire") ? 12 : 0)
+      + (built.has("shelter") ? 10 + buildingLevel("shelter") * 4 : 0)
+      + (built.has("cache") ? 8 : 0)
+      + (built.has("pier") ? 8 : 0);
+  }
+
+  function campDefenseValue() {
+    return (built.has("shelter") ? 2 + buildingLevel("shelter") : 0)
+      + (built.has("watchpost") ? 5 + buildingLevel("watchpost") * 3 : 0)
+      + (built.has("workbench") ? buildingLevel("workbench") : 0);
+  }
+
+  function campStory() {
+    return CAMP_STORIES[(campDefense.day + campDefense.wins + buildingLevels.size) % CAMP_STORIES.length];
+  }
+
+  function campRaidSpawns(wave: number) {
+    const points: [number, number, MobKind, number][] = wave === 1
+      ? [[4, 12, "crab", 24], [24, 12, "crab", 24]]
+      : wave === 2
+        ? [[6, 5, "crab", 28], [24, 9, "raider", 30], [5, 15, "crab", 28]]
+        : [[5, 6, "raider", 34], [24, 7, "raider", 34], [21, 16, "crab", 36], [8, 16, "crab", 36]];
+    for (const [c, r, kind, enemyHp] of points) {
+      const mob = mkMob("shoal", c, r, kind, enemyHp);
+      mob.campUnit = true;
+      mobs.push(mob);
+    }
+  }
+
+  function spawnCampWave(wave: number) {
+    campDefense.wave = wave;
+    campDefense.nextWave = 0;
+    campRaidSpawns(wave);
+    say(`Островная ночь: волна ${wave} из 3. Они идут на огонь.`);
+    burst(13 * TILE + 16, 10 * TILE + 16, wave === 3 ? "#d36f5f" : "#e8c070", 28);
+  }
+
+  function startCampDefense() {
+    if (map !== "shoal" || !built.has("shorefire") || !built.has("workbench") || campDefense.active) {
+      say(map !== "shoal" ? "Первый ночной дозор начинается на Острове Трёх досок." : "Для дозора нужны костёр и верстак — должно быть что защищать.");
+      emit(true);
+      return;
+    }
+    if (campDefense.hp <= 0) {
+      say("Лагерь разбит. Сначала почини его одним плавником.");
+      emit(true);
+      return;
+    }
+    if (food < 2) {
+      say("Для ночного дозора нужно 2 силы. Сначала отдохни у огня.");
+      emit(true);
+      return;
+    }
+    for (const mob of liveCampRaiders()) mob.hp = 0;
+    food -= 2;
+    campDefense = {
+      ...campDefense,
+      active: true,
+      wave: 0,
+      hp: campMaxHp(),
+      maxHp: campMaxHp(),
+      nextWave: 0,
+      towerCd: 0.7,
+    };
+    flags.delete("campBroken");
+    mode = "play";
+    say("Ночь стягивается к костру. Поставленные тобой стены теперь имеют цену.");
+    spawnCampWave(1);
+    audio.bell();
+    emit(true);
+  }
+
+  function repairCamp() {
+    if (map !== "shoal" || campDefense.active || campDefense.hp > 0) return;
+    if (!has("driftwood")) {
+      say("Для ремонта нужен один плавник. Берег вынесет новый после прилива.");
+      emit(true);
+      return;
+    }
+    spendNeeds(["driftwood"]);
+    campDefense.maxHp = campMaxHp();
+    campDefense.hp = campDefense.maxHp;
+    flags.delete("campBroken");
+    say("Сваи снова стянуты канатом. Лагерь готов пережить ещё одну ночь.");
+    burst(13 * TILE + 16, 10 * TILE + 16, "#d8c070", 26);
+    audio.ok();
+    emit(true);
+  }
+
+  function failCampDefense() {
+    campDefense.active = false;
+    campDefense.hp = 0;
+    flags.add("campBroken");
+    for (const mob of liveCampRaiders()) mob.hp = 0;
+    say("Ограда рухнула. Огонь засыпало песком, но утром лагерь можно связать заново одним плавником.");
+    burst(13 * TILE + 16, 10 * TILE + 16, "#c17a6a", 40);
+    shake = 0.8;
+    audio.hurt();
+  }
+
+  function finishCampDefense() {
+    campDefense.active = false;
+    campDefense.wins += 1;
+    campDefense.day += 1;
+    campDefense.hp = campDefense.maxHp;
+    flags.add("campNightWon");
+    const campBuildings = BUILDINGS.filter((building) => building.map === "shoal" && built.has(building.id)).length;
+    const pay = 3 + campBuildings + (built.has("cache") ? 2 : 0);
+    gold += pay;
+    give("driftwood");
+    if (campDefense.wins === 1) give("potion");
+    time += 8;
+    say(`Рассвет над Тремя досками. В сетях налётчиков найдено ${pay} золота. ${campStory()}`);
+    burst(13 * TILE + 16, 10 * TILE + 16, "#f0d58a", 46);
+    audio.ok();
+  }
+
   function liveKeepRaiders() {
     return mobs.filter((mob) => mob.map === "keep" && mob.kind === "raider" && mob.hp > 0);
   }
@@ -919,6 +1069,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
       { text: `Услышать голоса острова (${Math.min(3, loreCount())}/3)`, done: loreCount() >= 3 },
       { text: "Разжечь костёр и поставить верстак", done: built.has("shorefire") && built.has("workbench") },
+      { text: campDefense.active ? `Защитить лагерь ночью (волна ${campDefense.wave}/3)` : "Пережить первую ночь у костра", done: campDefense.wins > 0 },
       { text: built.has("pier") ? "Собрать лодку: 2 дерева · 1 полотно · 1 руда" : "Поставить причал или собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
       { text: transport === "boat" || map === "strait" ? "Провести лодку через пролив и отбиться от шлюпов" : "Спустить лодку и встать за штурвал", done: flags.has("leftShoal") },
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
@@ -961,6 +1112,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (!has("mapshard")) return "Цель: зайди в бар «Три доски» на севере тропы и купи у Нолла первый обрывок карты за 3 золота.";
       if (!built.has("shorefire")) return "Цель: собери плавник и нажми B — разожги первый костёр лагеря.";
       if (!built.has("workbench")) return "Цель: соедини лагерь дорожкой — поставь верстак из плавника.";
+      if (!flags.has("campNightWon")) return campDefense.hp <= 0 ? "Цель: найди плавник, почини лагерь и попробуй пережить ночь снова." : "Цель: открой стройку клавишей B и прими первый ночной дозор. Дозорная мачта будет стрелять сама.";
       if (!flags.has("raftBuilt")) return built.has("pier") ? "Цель: причал облегчает работу. Для лодки осталось 2 дерева, 1 полотно и 1 руда." : "Цель: поставь причал или собери для лодки 4 дерева, 2 полотна и 1 руду.";
       if (transport !== "boat") return "Цель: кликни по готовой лодке, встань за штурвал и сам выведи её с восточного пляжа.";
       return map === "strait" ? "Цель: пройди пролив. WASD — штурвал, ЛКМ — гарпун, Shift — резкий манёвр." : "Цель: веди лодку на восток через прибой. Ты управляешь ею напрямую.";
@@ -1140,6 +1292,33 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
               canStart: map === "keep" && !keepDefense.active && food >= 4 && keepDefense.hp > 0,
             }
           : null,
+      camp:
+        built.has("shorefire") || campDefense.active || flags.has("campBroken") || flags.has("campNightWon")
+          ? {
+              active: campDefense.active,
+              wave: campDefense.wave,
+              hp: campDefense.hp,
+              maxHp: campDefense.maxHp,
+              nextWave: campDefense.nextWave,
+              day: campDefense.day,
+              wins: campDefense.wins,
+              defense: campDefenseValue(),
+              status: campDefense.active
+                ? campDefense.nextWave > 0
+                  ? `Передышка ${Math.ceil(campDefense.nextWave)} сек.`
+                  : `Ночная волна ${campDefense.wave}/3`
+                : campDefense.hp <= 0
+                  ? "Лагерь разбит — нужен ремонт"
+                  : campDefense.wins > 0
+                    ? `Лагерь пережил ${campDefense.wins} ночей`
+                    : built.has("workbench")
+                      ? "Первая ночь ждёт у костра"
+                      : "Сначала нужен верстак",
+              story: campStory(),
+              canStart: map === "shoal" && built.has("shorefire") && built.has("workbench") && !campDefense.active && food >= 2 && campDefense.hp > 0,
+              canRepair: map === "shoal" && !campDefense.active && campDefense.hp <= 0 && has("driftwood"),
+            }
+          : null,
       guise: guise(),
       appearance: appearance(),
       goldFlash,
@@ -1252,6 +1431,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       vaultVisit,
       raid: { ...raid },
       keepDefense: { ...keepDefense },
+      campDefense: { ...campDefense },
       log: [...log],
       activeSlot,
       mobs: mobs.map((mob) => ({ ...mob })),
@@ -1349,6 +1529,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           wins: Math.max(0, Math.floor(save.keepDefense.wins)),
         }
       : { active: false, wave: 0, hp: fortressMaxHp(), maxHp: fortressMaxHp(), nextWave: 0, towerCd: 0, day: 1, wins: 0 };
+    campDefense = save.campDefense
+      ? {
+          active: save.campDefense.active,
+          wave: Math.max(0, Math.min(3, Math.floor(save.campDefense.wave))),
+          hp: Math.max(0, save.campDefense.hp),
+          maxHp: Math.max(48, save.campDefense.maxHp),
+          nextWave: Math.max(0, save.campDefense.nextWave),
+          towerCd: Math.max(0, save.campDefense.towerCd),
+          day: Math.max(1, Math.floor(save.campDefense.day)),
+          wins: Math.max(0, Math.floor(save.campDefense.wins)),
+        }
+      : { active: false, wave: 0, hp: campMaxHp(), maxHp: campMaxHp(), nextWave: 0, towerCd: 0, day: 1, wins: 0 };
     log.length = 0;
     log.push(...save.log.slice(-10));
     activeSlot = Math.max(-1, Math.min(2, Math.floor(save.activeSlot)));
@@ -1363,7 +1555,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     recalcKeep();
     for (const key of Object.keys(cds)) delete cds[key];
     Object.assign(cds, save.cds);
-    mobs = save.mobs.map((mob) => ({ ...mob, guard: mob.guard ?? (mob.kind === "crab" ? 1 : 0), windup: 0, windupMax: 0, attackTarget: "player" as const }));
+    mobs = save.mobs.map((mob) => ({ ...mob, guard: mob.guard ?? (mob.kind === "crab" ? 1 : 0), campUnit: mob.campUnit ?? false, windup: 0, windupMax: 0, attackTarget: "player" as const }));
     if (!flags.has("leftShoal")) {
       const starterCrab = mobs.find((mob) => mob.map === "shoal" && mob.kind === "crab" && mob.hp > 0);
       if (starterCrab && starterCrab.max < 34) {
@@ -1535,6 +1727,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     vaultVisit = false;
     raid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
     keepDefense = { active: false, wave: 0, hp: 70, maxHp: 70, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
+    campDefense = { active: false, wave: 0, hp: 60, maxHp: 60, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
     talkNpc = null;
     lastAsk = "";
     mode = "play";
@@ -2088,6 +2281,20 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (hp <= 0) {
       hp = 0;
       if (raid.active) failHavenRaid();
+      if (campDefense.active) {
+        failCampDefense();
+        hp = Math.max(6, Math.floor(maxHp / 2));
+        map = "shoal";
+        transport = "foot";
+        vx = 0;
+        vy = 0;
+        px = 13 * TILE + 16;
+        py = 11 * TILE + 16;
+        cam.x = px;
+        cam.y = py;
+        say("Нолл вытащил тебя из песка. Лагерь разбит, но ты ещё жив.");
+        return;
+      }
       say("Бруна вытащила тебя. Золото наполовину.");
       gold = Math.floor(gold / 2);
       hp = Math.max(6, Math.floor(maxHp / 2));
@@ -2378,6 +2585,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (map !== "shoal") return false;
     const distance = Math.hypot(SHOAL_BOAT.c * TILE + 16 - px, SHOAL_BOAT.r * TILE + 16 - py);
     if (distance > 48) return false;
+    if (campDefense.active) {
+      say("Нельзя бросить лагерь посреди ночной атаки.");
+      emit(true);
+      return true;
+    }
     if (!flags.has("raftBuilt")) {
       const needs = shoalBoatNeeds();
       if (!hasNeeds(needs)) {
@@ -2587,6 +2799,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     mods.luck = (owned.has("luck") ? 1.6 : 1) * (built.has("vault") ? 1.15 : 1);
     keepDefense.maxHp = fortressMaxHp();
     if (!keepDefense.active && keepDefense.hp > 0) keepDefense.hp = keepDefense.maxHp;
+    campDefense.maxHp = campMaxHp();
+    if (!campDefense.active && campDefense.hp > 0) campDefense.hp = campDefense.maxHp;
   }
 
   function warp(to: MapId, c: number, r: number, msg?: string) {
@@ -2688,6 +2902,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function doBuild(id: BuildId) {
+    if (campDefense.active && map === "shoal") {
+      say("Молот подождёт. Сначала удержи огонь до рассвета.");
+      emit(true);
+      return;
+    }
     const b = BUILDINGS.find((x) => x.id === id);
     if (!b || map !== b.map) {
       say("Эта постройка относится к другому поселению.");
@@ -2779,6 +2998,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function rest() {
     if (keepDefense.active && map === "keep") {
       say("Во время осады отдыхать нельзя. Сначала удержи очаг.");
+      emit(true);
+      return;
+    }
+    if (campDefense.active && map === "shoal") {
+      say("Пока враги идут на огонь, спать нельзя.");
       emit(true);
       return;
     }
@@ -3167,13 +3391,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       const playerDist = Math.hypot(px - m.x, py - m.y);
       const attacksKeep = keepDefense.active && m.kind === "raider" && m.map === "keep";
-      const attacksHaven = !attacksKeep && raid.active && m.kind === "raider" && playerDist >= 76;
-      const targetX = attacksKeep ? 3 * TILE + 16 : attacksHaven ? 13 * TILE + 16 : px;
-      const targetY = attacksKeep ? 3 * TILE + 16 : attacksHaven ? 17 * TILE + 16 : py;
+      const attacksCamp = !attacksKeep && campDefense.active && m.campUnit && m.map === "shoal" && playerDist >= 72;
+      const attacksHaven = !attacksKeep && !attacksCamp && raid.active && m.kind === "raider" && playerDist >= 76;
+      const targetX = attacksKeep ? 3 * TILE + 16 : attacksCamp ? 13 * TILE + 16 : attacksHaven ? 13 * TILE + 16 : px;
+      const targetY = attacksKeep ? 3 * TILE + 16 : attacksCamp ? 10 * TILE + 16 : attacksHaven ? 17 * TILE + 16 : py;
       const dx = targetX - m.x;
       const dy = targetY - m.y;
       const dist = Math.hypot(dx, dy);
-      const aggro = m.kind === "raider" || m.kind === "skiff" ? Infinity : m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
+      const aggro = m.campUnit || m.kind === "raider" || m.kind === "skiff" ? Infinity : m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
       if (m.map === "shoal" && m.kind === "crab" && playerDist < 145 && !flags.has("crabSeen")) {
         flags.add("crabSeen");
         say("Панцирник закрывается от первого удара. Красный круг показывает замах: Shift — уворот, затем бей в раскрытый бок.");
@@ -3185,18 +3410,19 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         shake = 0.55;
       }
 
-      const reach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : attacksHaven || attacksKeep ? 30 : 22;
+      const reach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : attacksHaven || attacksKeep || attacksCamp ? 30 : 22;
       if (m.windup > 0) {
         m.windup = Math.max(0, m.windup - dt);
         if (m.windup <= 0) {
           const hitsHaven = m.attackTarget === "haven";
           const hitsKeep = m.attackTarget === "keep";
-          const hitX = hitsKeep ? 3 * TILE + 16 : hitsHaven ? 13 * TILE + 16 : px;
-          const hitY = hitsKeep ? 3 * TILE + 16 : hitsHaven ? 17 * TILE + 16 : py;
+          const hitsCamp = m.attackTarget === "camp";
+          const hitX = hitsKeep ? 3 * TILE + 16 : hitsCamp ? 13 * TILE + 16 : hitsHaven ? 13 * TILE + 16 : px;
+          const hitY = hitsKeep ? 3 * TILE + 16 : hitsCamp ? 10 * TILE + 16 : hitsHaven ? 17 * TILE + 16 : py;
           const hitDx = hitX - m.x;
           const hitDy = hitY - m.y;
           const hitDist = Math.hypot(hitDx, hitDy);
-          const hitReach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : hitsHaven || hitsKeep ? 30 : 22;
+          const hitReach = m.kind === "brine" ? 68 : m.kind === "skiff" ? 42 : hitsHaven || hitsKeep || hitsCamp ? 30 : 22;
           const attackColor = m.kind === "brine" ? "#9ed8d0" : m.kind === "skiff" ? "#f0b06b" : m.kind === "wraith" ? "#b89ad8" : m.kind === "crab" ? "#d8a06a" : "#d58a78";
           m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "skiff" ? 1.35 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : m.kind === "crab" ? 1.12 : 0.85;
           if (hitDist < hitReach + 18) {
@@ -3206,6 +3432,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             if (hitsKeep) {
               keepDefense.hp = Math.max(0, keepDefense.hp - MOB[m.kind].atk);
               float(hitX + (Math.random() - 0.5) * 30, hitY - 20, `-${MOB[m.kind].atk}`, "#e8c070");
+              audio.hit();
+            } else if (hitsCamp) {
+              const reduced = Math.max(1, MOB[m.kind].atk - Math.floor(campDefenseValue() / 4));
+              campDefense.hp = Math.max(0, campDefense.hp - reduced);
+              float(hitX + (Math.random() - 0.5) * 30, hitY - 20, `-${reduced}`, "#f0c47a");
               audio.hit();
             } else if (hitsHaven) {
               raid.havenHp = Math.max(0, raid.havenHp - MOB[m.kind].atk);
@@ -3231,7 +3462,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         const sp =
           (m.kind === "wolf" ? 70 : m.kind === "skiff" ? 74 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) *
           (m.slow > 0 ? 0.4 : 1) *
-          (attacksKeep && built.has("gate") ? 0.62 : 1);
+          (attacksKeep && built.has("gate") ? 0.62 : attacksCamp && built.has("shelter") ? 0.82 : 1);
         const mx2 = m.x + (dx / dist) * sp * dt;
         const my2 = m.y + (dy / dist) * sp * dt;
         if (!mobSolidAt(m, mx2, m.y)) m.x = mx2;
@@ -3251,7 +3482,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (dist < reach && m.atkCd <= 0) {
         m.windupMax = m.kind === "brine" ? 0.78 : m.kind === "skiff" ? 0.86 : m.kind === "crab" ? 0.68 : m.kind === "orc" ? 0.5 : m.kind === "wraith" ? 0.42 : 0.34;
         m.windup = m.windupMax;
-        m.attackTarget = attacksKeep ? "keep" : attacksHaven ? "haven" : "player";
+        m.attackTarget = attacksKeep ? "keep" : attacksCamp ? "camp" : attacksHaven ? "haven" : "player";
       }
     }
 
@@ -3319,6 +3550,53 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           } else {
             keepDefense.nextWave -= dt;
             if (keepDefense.nextWave <= 0) spawnKeepWave(keepDefense.wave + 1);
+          }
+        }
+      }
+    }
+
+    if (campDefense.active) {
+      if (campDefense.hp <= 0) {
+        failCampDefense();
+      } else {
+        const invaders = liveCampRaiders();
+        if (invaders.length > 0 && built.has("watchpost")) {
+          campDefense.towerCd -= dt;
+          if (campDefense.towerCd <= 0) {
+            const watchLevel = buildingLevel("watchpost");
+            campDefense.towerCd = watchLevel >= 2 ? 0.95 : 1.35;
+            const tower = BUILDINGS.find((building) => building.id === "watchpost")!;
+            const tx = tower.c * TILE + 16;
+            const ty = tower.r * TILE + 16;
+            const target = invaders.reduce((best, candidate) =>
+              Math.hypot(candidate.x - 13 * TILE - 16, candidate.y - 10 * TILE - 16) < Math.hypot(best.x - 13 * TILE - 16, best.y - 10 * TILE - 16)
+                ? candidate
+                : best,
+            );
+            const damage = watchLevel >= 2 ? 10 : 6;
+            fireShot({
+              x: tx,
+              y: ty,
+              vx: ((target.x - tx) / Math.max(1, Math.hypot(target.x - tx, target.y - ty))) * 340,
+              vy: ((target.y - ty) / Math.max(1, Math.hypot(target.x - tx, target.y - ty))) * 340,
+              dmg: damage,
+              color: "#f0d58a",
+              kind: "arrow",
+              life: 1.1,
+            });
+            addSlash(tx, ty, Math.atan2(target.y - ty, target.x - tx), 50, "#f0d58a", "arc", 0.2);
+          }
+        }
+        if (liveCampRaiders().length === 0) {
+          if (campDefense.wave >= 3) {
+            finishCampDefense();
+          } else if (campDefense.nextWave <= 0) {
+            campDefense.nextWave = 4;
+            if (built.has("shelter")) campDefense.hp = Math.min(campDefense.maxHp, campDefense.hp + 6);
+            say(`Волна ${campDefense.wave} отбита. Четыре секунды тишины у огня.`);
+          } else {
+            campDefense.nextWave -= dt;
+            if (campDefense.nextWave <= 0) spawnCampWave(campDefense.wave + 1);
           }
         }
       }
@@ -3957,6 +4235,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     drawAmbientLife();
 
     if (map === "shoal") {
+      if (campDefense.active) {
+        ctx.save();
+        ctx.fillStyle = "rgba(5,10,24,0.48)";
+        ctx.fillRect(0, 0, cssW, cssH);
+        const moon = ctx.createRadialGradient(cssW * 0.78, cssH * 0.12, 4, cssW * 0.78, cssH * 0.12, Math.max(cssW, cssH) * 0.7);
+        moon.addColorStop(0, "rgba(117,153,190,0.12)");
+        moon.addColorStop(1, "rgba(13,20,40,0)");
+        ctx.fillStyle = moon;
+        ctx.fillRect(0, 0, cssW, cssH);
+        ctx.restore();
+      }
       for (const [fromId, toId] of SHOAL_BUILD_LINKS) {
         const from = BUILDINGS.find((candidate) => candidate.id === fromId)!;
         const to = BUILDINGS.find((candidate) => candidate.id === toId)!;
@@ -4160,7 +4449,24 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           ctx.fillStyle = glow;
           ctx.fillRect(center.x - 58, center.y - 58, 116, 116);
         }
+        ctx.save();
+        if (flags.has("campBroken")) {
+          ctx.globalAlpha = 0.58;
+          ctx.filter = "grayscale(0.55) brightness(0.72)";
+        }
         sheetGrid(imgs[b.sheet], b.sprite, 3, 2, p.x, p.y, size);
+        ctx.restore();
+        if (flags.has("campBroken") && (b.id === "shorefire" || b.id === "shelter")) {
+          ctx.save();
+          ctx.fillStyle = "rgba(35,31,30,0.3)";
+          for (let smoke = 0; smoke < 3; smoke++) {
+            const drift = Math.sin(time * (1.1 + smoke * 0.17) + smoke * 2.2) * 7;
+            ctx.beginPath();
+            ctx.ellipse(p.x + size * 0.46 + drift, p.y + size * (0.42 - smoke * 0.12), 7 + smoke * 3, 10 + smoke * 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
         const fx = buildFx.get(b.id) ?? 0;
         if (fx > 0) {
           const progress = 1 - fx / 1.35;
@@ -4181,6 +4487,22 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         if (near && (b.id === "shorefire" || b.id === "shelter" || b.id === "workbench")) {
           drawWorldPrompt(b.c * TILE + 16, b.r * TILE - 1, b.id === "workbench" ? "Крафт и улучшения" : "Отдохнуть");
         }
+      }
+      if (campDefense.active) {
+        const fire = wrld(13 * TILE + 16, 10 * TILE - 30);
+        const barWidth = 92;
+        ctx.save();
+        ctx.fillStyle = "rgba(8,10,14,0.86)";
+        ctx.fillRect(fire.x - barWidth / 2 - 3, fire.y - 3, barWidth + 6, 18);
+        ctx.fillStyle = "#3a2921";
+        ctx.fillRect(fire.x - barWidth / 2, fire.y, barWidth, 7);
+        ctx.fillStyle = campDefense.hp / campDefense.maxHp > 0.35 ? "#e2b866" : "#c86558";
+        ctx.fillRect(fire.x - barWidth / 2, fire.y, barWidth * Math.max(0, campDefense.hp / campDefense.maxHp), 7);
+        ctx.font = "600 9px IBM Plex Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#f0dfbd";
+        ctx.fillText(`ЛАГЕРЬ · ${Math.ceil(campDefense.hp)}/${campDefense.maxHp}`, fire.x, fire.y + 14);
+        ctx.restore();
       }
     }
     if (map === "keep") {
@@ -4348,8 +4670,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       if (m.windup > 0 && m.windupMax > 0) {
         const charged = 1 - m.windup / m.windupMax;
-        const targetX = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "haven" ? 13 * TILE + 16 : px;
-        const targetY = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "haven" ? 17 * TILE + 16 : py;
+        const targetX = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "camp" ? 13 * TILE + 16 : m.attackTarget === "haven" ? 13 * TILE + 16 : px;
+        const targetY = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "camp" ? 10 * TILE + 16 : m.attackTarget === "haven" ? 17 * TILE + 16 : py;
         const attackAng = Math.atan2(targetY - m.y, targetX - m.x);
         ctx.setLineDash([]);
         ctx.globalAlpha = 0.18 + charged * 0.28;
@@ -5192,6 +5514,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     },
     travel,
     toggleBuild() {
+      if (campDefense.active && map === "shoal") {
+        say("Сейчас не строят — сейчас держат линию у костра.");
+        emit(true);
+        return;
+      }
       if (mode === "build" || mode === "site") mode = "play";
       else if ((map === "keep" || map === "shoal") && (mode === "play" || mode === "way" || mode === "atlas")) mode = "build";
       else if (mode === "play") {
@@ -5205,6 +5532,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     rest,
     tendHearth,
     startKeepDefense,
+    startCampDefense,
+    repairCamp,
     toggleInv() {
       if (mode === "inv") mode = "play";
       else if (mode === "play") mode = "inv";

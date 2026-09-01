@@ -38,6 +38,7 @@ const BASE: GameSave = {
   vaultVisit: false,
   raid: { active: true, wave: 2, havenHp: 64, maxHavenHp: 110, nextWave: 0, towerCd: 0.8 },
   keepDefense: { active: false, wave: 0, hp: 90, maxHp: 90, nextWave: 0, towerCd: 0, day: 3, wins: 1 },
+  campDefense: { active: false, wave: 0, hp: 60, maxHp: 60, nextWave: 0, towerCd: 0, day: 2, wins: 1 },
   log: ["Начало"],
   activeSlot: 0,
   mobs: [],
@@ -64,6 +65,7 @@ test("corrupt and incompatible saves fail closed", () => {
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, map: "nowhere" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, raid: { active: true, wave: "two" } })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, keepDefense: { active: true, wave: "two" } })), null);
+  assert.equal(decodeGameSave(JSON.stringify({ ...BASE, campDefense: { active: true, wave: "two" } })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, groundItems: [{ id: 1, map: "void", x: 0, y: 0, item: "hide" }] })), null);
 });
 
@@ -95,6 +97,13 @@ test("saves from before courtyard defense still load", () => {
   assert.equal(decoded.keepDefense, undefined);
 });
 
+test("saves from before starter-camp defense still load", () => {
+  const { campDefense: _campDefense, ...legacy } = BASE;
+  const decoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(decoded);
+  assert.equal(decoded.campDefense, undefined);
+});
+
 test("settlement upgrades survive and older building saves default cleanly", () => {
   const upgraded: GameSave = { ...BASE, built: ["shorefire", "workbench"], buildingLevels: [["shorefire", 2], ["workbench", 1]] };
   const decoded = decodeGameSave(JSON.stringify(upgraded));
@@ -112,11 +121,12 @@ test("boat transport and enemy guards survive a save round-trip", () => {
     map: "strait",
     transport: "boat",
     transportAngle: 0.75,
-    mobs: [{ id: 7, map: "strait", x: 400, y: 280, kind: "skiff", hp: 31, max: 44, wait: 0, stun: 0, slow: 0, poison: 0, atkCd: 0, flash: 0, guard: 0 }],
+    mobs: [{ id: 7, map: "strait", x: 400, y: 280, kind: "skiff", hp: 31, max: 44, wait: 0, stun: 0, slow: 0, poison: 0, atkCd: 0, flash: 0, guard: 0, campUnit: true }],
   };
   const decoded = decodeGameSave(JSON.stringify(voyage));
   assert.ok(decoded);
   assert.equal(decoded.transport, "boat");
   assert.equal(decoded.mobs[0].kind, "skiff");
   assert.equal(decoded.mobs[0].guard, 0);
+  assert.equal(decoded.mobs[0].campUnit, true);
 });

@@ -72,6 +72,7 @@ const IDLE: Snapshot = {
   haven: null,
   raid: null,
   fortress: null,
+  camp: null,
   guise: "oath",
   appearance: "base",
   goldFlash: 0,
@@ -647,8 +648,18 @@ export function Oathbound() {
           </div>
         ) : null}
 
+        {playing && snap.camp?.active ? (
+          <div className="camp-hud absolute top-3 left-1/2 w-[min(25rem,52vw)] -translate-x-1/2 px-4 py-2 hud-ink">
+            <div className="flex items-center justify-between gap-3 font-mono text-[10px] tracking-widest">
+              <span className="flex items-center gap-1.5 text-[#f0c47b]"><Flame className="size-3.5" /> ПЕРВАЯ НОЧЬ · {snap.camp.status}</span>
+              <span className="tabular-nums text-muted">{Math.ceil(snap.camp.hp)}/{snap.camp.maxHp}</span>
+            </div>
+            <div className="stat-bar mt-1.5 h-2"><i className="camp-health" style={{ width: `${Math.max(0, (snap.camp.hp / snap.camp.maxHp) * 100)}%` }} /></div>
+          </div>
+        ) : null}
+
         {playing && snap.mode === "play" && snap.target ? (
-          <aside className={`target-card absolute left-1/2 -translate-x-1/2 ${snap.raid?.active || snap.fortress?.active || snap.target.kind === "brine" ? "top-16" : "top-3"}`}>
+          <aside className={`target-card absolute left-1/2 -translate-x-1/2 ${snap.raid?.active || snap.fortress?.active || snap.camp?.active || snap.target.kind === "brine" ? "top-16" : "top-3"}`}>
             <MobPortrait kind={snap.target.kind} />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-3">
@@ -962,6 +973,31 @@ export function Oathbound() {
                   <div className="fortress-actions">
                     <Button variant="ghost" onClick={() => g.current?.tendHearth()}><Flame /> Сесть у очага</Button>
                     <Button disabled={!snap.fortress.canStart} onClick={() => g.current?.startKeepDefense()}><MoonStar /> Ночной дозор · −4 силы</Button>
+                  </div>
+                </section>
+              ) : null}
+              {snap.you.map === "shoal" && snap.camp ? (
+                <section className={`fortress-card camp-card mt-5 ${snap.camp.hp <= 0 ? "is-broken" : ""}`}>
+                  <div className="fortress-card-head">
+                    <span className="fortress-seal camp-seal"><Flame /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-[10px] tracking-[0.2em] text-[#e5b86f]">ОСТРОВ ТРЁХ ДОСОК · НОЧЬ {snap.camp.day}</p>
+                      <h3 className="mt-1 font-display text-xl font-semibold">{snap.camp.status}</h3>
+                    </div>
+                    <div className="fortress-metrics">
+                      <span><Shield /> защита <b>{snap.camp.defense}</b></span>
+                      <span><MoonStar /> ночей <b>{snap.camp.wins}</b></span>
+                    </div>
+                  </div>
+                  <div className="fortress-wall camp-wall"><i style={{ width: `${Math.max(0, (snap.camp.hp / snap.camp.maxHp) * 100)}%` }} /></div>
+                  <blockquote className="fortress-story"><Flame /> <span>{snap.camp.story}</span></blockquote>
+                  <p className="fortress-help">Ночью крабы и налётчики идут на свет костра. Дозорная мачта стреляет сама, навес чинит 6 прочности между волнами, а улучшения делают обе постройки сильнее.</p>
+                  <div className="fortress-actions">
+                    {snap.camp.hp <= 0 ? (
+                      <Button disabled={!snap.camp.canRepair} onClick={() => g.current?.repairCamp()}><Hammer /> Починить · 1 плавник</Button>
+                    ) : (
+                      <Button disabled={!snap.camp.canStart} onClick={() => g.current?.startCampDefense()}><MoonStar /> {snap.camp.wins ? "Ночной дозор" : "Первая ночь"} · −2 силы</Button>
+                    )}
                   </div>
                 </section>
               ) : null}

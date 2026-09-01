@@ -25,6 +25,7 @@ export type SavedMob = {
   atkCd: number;
   flash: number;
   guard?: number;
+  campUnit?: boolean;
 };
 
 export type SavedRaid = {
@@ -47,6 +48,8 @@ export type SavedKeepDefense = {
   wins: number;
 };
 
+export type SavedCampDefense = SavedKeepDefense;
+
 export type SavedGroundItem = {
   id: number;
   map: MapId;
@@ -63,6 +66,7 @@ export type GameSave = {
   transportAngle?: number;
   raid?: SavedRaid;
   keepDefense?: SavedKeepDefense;
+  campDefense?: SavedCampDefense;
   mode: SavedMode;
   heroId: HeroId;
   map: MapId;
@@ -151,7 +155,8 @@ function validMob(value: unknown) {
     typeof value.kind === "string" &&
     MOB_KINDS.has(value.kind) &&
     [value.x, value.y, value.hp, value.max, value.wait, value.stun, value.slow, value.poison, value.atkCd, value.flash].every(finite) &&
-    (value.guard === undefined || finite(value.guard))
+    (value.guard === undefined || finite(value.guard)) &&
+    (value.campUnit === undefined || typeof value.campUnit === "boolean")
   );
 }
 
@@ -194,6 +199,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     if (value.transportAngle !== undefined && !finite(value.transportAngle)) return null;
     if (value.raid !== undefined && !validRaid(value.raid)) return null;
     if (value.keepDefense !== undefined && !validKeepDefense(value.keepDefense)) return null;
+    if (value.campDefense !== undefined && !validKeepDefense(value.campDefense)) return null;
     if (typeof value.mode !== "string" || !MODES.has(value.mode)) return null;
     if (typeof value.heroId !== "string" || !HERO_IDS.has(value.heroId)) return null;
     if (typeof value.map !== "string" || !MAP_IDS.has(value.map)) return null;

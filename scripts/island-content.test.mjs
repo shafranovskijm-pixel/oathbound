@@ -86,6 +86,26 @@ test("starter camp is a reachable connected upgrade graph with original art", as
   assert.ok(art.byteLength > 100_000);
 });
 
+test("first-night attackers have open routes to the shorefire", () => {
+  const fire = BUILDINGS.find((building) => building.id === "shorefire");
+  const watch = BUILDINGS.find((building) => building.id === "watchpost");
+  const shelter = BUILDINGS.find((building) => building.id === "shelter");
+  assert.ok(fire);
+  assert.ok(watch?.requires?.includes("workbench"));
+  assert.ok(shelter?.requires?.includes("shorefire"));
+  const waves = [
+    [[4, 12], [24, 12]],
+    [[6, 5], [24, 9], [5, 15]],
+    [[5, 6], [24, 7], [21, 16], [8, 16]],
+  ];
+  for (const points of waves) {
+    for (const [c, r] of points) {
+      assert.equal(blocked("shoal", c, r), false, `night spawn ${c},${r} must be open`);
+      assert.equal(reachable("shoal", { c, r }, fire), true, `night spawn ${c},${r} must reach the shorefire`);
+    }
+  }
+});
+
 test("starter island lore is discoverable and backed by original art", async () => {
   const finds = source.loreFinds.filter((find) => find.map === "shoal");
   assert.ok(finds.length >= 5);
