@@ -10,7 +10,7 @@ import {
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, SITES, gatherNodeAt, siteAt, type SiteId } from "./data";
-import { readGameSave, writeGameSave, type GameSave, type SavedMode, type SavedRaid } from "./save";
+import { readGameSave, writeGameSave, type GameSave, type SavedKeepDefense, type SavedMode, type SavedRaid } from "./save";
 import {
   EXITS,
   MAP_SIZE,
@@ -91,6 +91,19 @@ export type Snapshot = {
   tide: { label: string; level: number } | null;
   haven: { name: string; effect: string } | null;
   raid: { active: boolean; wave: number; havenHp: number; maxHavenHp: number; nextWave: number; status: string } | null;
+  fortress: {
+    active: boolean;
+    wave: number;
+    hp: number;
+    maxHp: number;
+    nextWave: number;
+    day: number;
+    wins: number;
+    defense: number;
+    status: string;
+    story: string;
+    canStart: boolean;
+  } | null;
   guise: Guise;
   appearance: Appearance;
   goldFlash: number;
@@ -131,6 +144,7 @@ export type Snapshot = {
   nearSite: SiteId | null;
   landmarks: { id: string; name: string; c: number; r: number }[];
   canContinue: boolean;
+  savePreview: { heroId: HeroId; hero: string; level: number; place: string; built: number; updatedAt: number } | null;
 };
 
 export type GameHandle = {
@@ -150,6 +164,8 @@ export type GameHandle = {
   toggleBuild: () => void;
   build: (id: BuildId) => void;
   rest: () => void;
+  tendHearth: () => void;
+  startKeepDefense: () => void;
   toggleInv: () => void;
   toggleJournal: () => void;
   usePotion: () => void;
@@ -187,6 +203,15 @@ const STACKABLE_ITEMS = new Set<ItemId>([
 
 const AUTO_EQUIP_ITEMS = new Set<ItemId>(["steel", "chain", "sash", "robe", "shroud", "harpoon", "stormcloak", "shellmail", "tidehelm", "havenhood", "saltvisor", "firecrown"]);
 
+const HEARTH_STORIES = [
+  "Дождь стучит по новой крыше. Впервые за долгое время этот звук не похож на погоню.",
+  "На камне у огня кто-то вырезал: «Дом — это место, которое пережило твоё отсутствие».",
+  "Лира оставляет у очага вторую кружку, даже когда ночует в карауле. Она не говорит, для кого.",
+  "Из кузницы тянет углём и горячим железом. Двор снова пахнет работой, а не пеплом.",
+  "В башне звенит приливный камень. Море далеко, но его дыхание уже поселилось в стенах.",
+  "На рассвете у ворот находят связку сухих трав. Никто из дозорных не видел, кто её принёс.",
+];
+
 type Mob = {
   id: number;
   map: MapId;
@@ -203,7 +228,7 @@ type Mob = {
   flash: number;
   windup: number;
   windupMax: number;
-  attackTarget: "player" | "haven";
+  attackTarget: "player" | "haven" | "keep";
 };
 type Shot = {
   x: number;
@@ -344,6 +369,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let keepRegen = 0.6;
   let vaultVisit = false;
   let raid: SavedRaid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
+  let keepDefense: SavedKeepDefense = { active: false, wave: 0, hp: 70, maxHp: 70, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
   const log: string[] = [];
   let hint = "WASD ход · E действие · Пробел удар · 1 2 3 магия";
   let talkNpc: Npc | null = null;
@@ -655,6 +681,123 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     audio.ok();
   }
 
+  function liveKeepRaiders() {
+    return mobs.filter((mob) => mob.map === "keep" && mob.kind === "raider" && mob.hp > 0);
+  }
+
+  function fortressMaxHp() {
+    return 70 + (built.has("hearth") ? 20 : 0) + (built.has("vault") ? 15 : 0) + (built.has("barracks") ? 45 : 0) + (built.has("gate") ? 30 : 0);
+  }
+
+  function fortressDefense() {
+    return (built.has("forge") ? 3 : 0) + (built.has("tower") ? 10 : 0) + (built.has("barracks") ? 7 : 0) + (built.has("gate") ? 4 : 0);
+  }
+
+  function hearthStory() {
+    return HEARTH_STORIES[(keepDefense.day + keepDefense.wins + built.size) % HEARTH_STORIES.length];
+  }
+
+  function keepRaidSpawns(wave: number) {
+    const points =
+      wave === 1
+        ? [[2, 7], [17, 7], [10, 2]]
+        : wave === 2
+          ? [[2, 5], [17, 5], [6, 12], [14, 12]]
+          : [[2, 3], [17, 3], [2, 10], [17, 10], [10, 12]];
+    for (const [c, r] of points) mobs.push(mkMob("keep", c, r, "raider"));
+  }
+
+  function spawnKeepWave(wave: number) {
+    keepDefense.wave = wave;
+    keepDefense.nextWave = 0;
+    keepRaidSpawns(wave);
+    say(`Ночной дозор: волна ${wave} из 3. Враги идут к очагу.`);
+    burst(3 * TILE + 16, 3 * TILE + 16, wave === 3 ? "#e07a4a" : "#e8c070", 26);
+  }
+
+  function startKeepDefense() {
+    if (map !== "keep" || !built.has("hearth") || keepDefense.active) {
+      say(map !== "keep" ? "Ночной дозор начинается только во дворе." : "Сначала нужен очаг — крепости должно быть что защищать.");
+      emit(true);
+      return;
+    }
+    if (keepDefense.hp <= 0) {
+      say("Сначала сядь у очага и почини ограду.");
+      emit(true);
+      return;
+    }
+    if (food < 4) {
+      say("Для ночного дозора нужно 4 силы. Сначала поешь у очага.");
+      emit(true);
+      return;
+    }
+    food -= 4;
+    keepDefense = {
+      ...keepDefense,
+      active: true,
+      wave: 0,
+      hp: fortressMaxHp(),
+      maxHp: fortressMaxHp(),
+      nextWave: 0,
+      towerCd: 0.7,
+    };
+    mode = "play";
+    say("Ворота заперты. Свет в окнах погашен. Двор принимает ночной дозор.");
+    spawnKeepWave(1);
+    audio.ok();
+    emit(true);
+  }
+
+  function failKeepDefense() {
+    keepDefense.active = false;
+    keepDefense.hp = 0;
+    for (const mob of liveKeepRaiders()) mob.hp = 0;
+    say("Ограда пала, но очаг не погас. Утром двор можно поднять снова.");
+    burst(3 * TILE + 16, 3 * TILE + 16, "#c17a6a", 38);
+    shake = 0.7;
+    audio.hurt();
+  }
+
+  function finishKeepDefense() {
+    keepDefense.active = false;
+    keepDefense.wins += 1;
+    keepDefense.day += 1;
+    keepDefense.hp = keepDefense.maxHp;
+    const pay = 6 + built.size * 2 + (built.has("vault") ? 4 : 0);
+    gold += pay;
+    if (built.has("hearth")) give("wood");
+    if (built.has("forge")) give("ore");
+    if (built.has("tower")) give("cloth");
+    if (built.has("barracks")) give("hide");
+    say(`Рассвет над Двором. Десятина дозора: +${pay} золота. ${hearthStory()}`);
+    burst(3 * TILE + 16, 3 * TILE + 16, "#f0d58a", 42);
+    audio.ok();
+  }
+
+  function tendHearth() {
+    if (map !== "keep" || !built.has("hearth")) {
+      say("Сначала подними очаг во дворе.");
+      emit(true);
+      return;
+    }
+    if (keepDefense.active) {
+      say("Не время садиться у огня — двор под ударом.");
+      emit(true);
+      return;
+    }
+    keepDefense.day += 1;
+    keepDefense.maxHp = fortressMaxHp();
+    keepDefense.hp = keepDefense.maxHp;
+    time += 12;
+    hp = maxHp;
+    mp = maxMp;
+    food = Math.max(food, 24);
+    say(`Вечер у очага. ${hearthStory()}`);
+    burst(3 * TILE + 16, 3 * TILE + 16, "#e8c070", 18);
+    audio.ok();
+    emit(true);
+  }
+
   function canMake(r: (typeof CRAFT)[number]) {
     if (gold < recipeGold(r)) return false;
     const count: Partial<Record<ItemId, number>> = {};
@@ -720,6 +863,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Убить Солевого хранителя", done: has("stormheart") || has("tidehelm") },
       { text: "Поднять постройку на участке (роща, межа, кряж, топь, мыс)", done: raised.size > 0 },
       { text: "Основать убежище в бухте Соляного киля", done: raised.has("haven") },
+      { text: "Разжечь очаг и сделать Двор домом", done: built.has("hearth") },
+      {
+        text: keepDefense.active ? `Пережить ночной дозор (волна ${keepDefense.wave}/3)` : "Пережить первую ночь во Дворе",
+        done: keepDefense.wins > 0,
+      },
       {
         text: flags.has("eiraQuest") ? `Очистить берег для Эйры (${eiraKills}/4)` : "Поговорить с Эйрой после основания гавани",
         done: flags.has("eiraDone"),
@@ -747,7 +895,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (!flags.has("sailed")) return "Цель: надень кушак в сумке и поговори с Рином на корабле.";
     if (!has("tide")) return "Цель: найди приливный тайник на северо-востоке острова.";
     if (!has("stormheart") && !hasOrDropped("stormheart")) return "Цель: спустись в Приливный грот и победи Солевого хранителя.";
-    return "Исследуй остров, строй убежища и создавай снаряжение в мастерской.";
+    return "Исследуй остров — или вернись к очагу, укрепи Двор и прими ночной дозор.";
   }
 
   function talkKeys(n: Npc) {
@@ -763,6 +911,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function snapshot(): Snapshot {
     const h = HEROES[heroId];
+    const storedSave = mode === "menu" ? readGameSave() : null;
     const targetMob = mobs.find((mob) => mob.id === huntId && mob.map === map && mob.hp > 0) ?? null;
     const targetStatuses = targetMob
       ? [targetMob.stun > 0 ? "оглушён" : "", targetMob.slow > 0 ? "замедлен" : "", targetMob.poison > 0 ? "отравлен" : ""].filter(Boolean)
@@ -870,6 +1019,30 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
                   : "Гавань разрушена",
             }
           : null,
+      fortress:
+        built.has("hearth") || keepDefense.active
+          ? {
+              active: keepDefense.active,
+              wave: keepDefense.wave,
+              hp: keepDefense.hp,
+              maxHp: keepDefense.maxHp,
+              nextWave: keepDefense.nextWave,
+              day: keepDefense.day,
+              wins: keepDefense.wins,
+              defense: fortressDefense(),
+              status: keepDefense.active
+                ? keepDefense.nextWave > 0
+                  ? `Передышка ${Math.ceil(keepDefense.nextWave)} сек.`
+                  : `Ночная волна ${keepDefense.wave}/3`
+                : keepDefense.hp <= 0
+                  ? "Ограда требует ремонта у очага"
+                  : keepDefense.wins > 0
+                    ? `Двор пережил ${keepDefense.wins} осад`
+                    : "Двор готовится к первой ночи",
+              story: hearthStory(),
+              canStart: map === "keep" && !keepDefense.active && food >= 4 && keepDefense.hp > 0,
+            }
+          : null,
       guise: guise(),
       appearance: appearance(),
       goldFlash,
@@ -914,6 +1087,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       nearSite: siteAt(map, tileC(), tileR())?.id ?? null,
       landmarks: LANDMARKS.map((l) => ({ ...l, c: l.id === "dock" ? DOCK.c : l.c, r: l.id === "dock" ? DOCK.r : l.r })),
       canContinue: saveAvailable,
+      savePreview: storedSave
+        ? {
+            heroId: storedSave.heroId,
+            hero: HEROES[storedSave.heroId].name,
+            level: storedSave.level,
+            place: PLACE[storedSave.map],
+            built: storedSave.built.length,
+            updatedAt: storedSave.updatedAt,
+          }
+        : null,
     };
   }
 
@@ -961,6 +1144,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       fieldPortal: fieldPortal ? { ...fieldPortal } : null,
       vaultVisit,
       raid: { ...raid },
+      keepDefense: { ...keepDefense },
       log: [...log],
       activeSlot,
       mobs: mobs.map((mob) => ({ ...mob })),
@@ -1034,6 +1218,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           towerCd: Math.max(0, save.raid.towerCd),
         }
       : { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
+    keepDefense = save.keepDefense
+      ? {
+          active: save.keepDefense.active,
+          wave: Math.max(0, Math.min(3, Math.floor(save.keepDefense.wave))),
+          hp: Math.max(0, save.keepDefense.hp),
+          maxHp: Math.max(70, save.keepDefense.maxHp),
+          nextWave: Math.max(0, save.keepDefense.nextWave),
+          towerCd: Math.max(0, save.keepDefense.towerCd),
+          day: Math.max(1, Math.floor(save.keepDefense.day)),
+          wins: Math.max(0, Math.floor(save.keepDefense.wins)),
+        }
+      : { active: false, wave: 0, hp: fortressMaxHp(), maxHp: fortressMaxHp(), nextWave: 0, towerCd: 0, day: 1, wins: 0 };
     log.length = 0;
     log.push(...save.log.slice(-10));
     activeSlot = Math.max(-1, Math.min(2, Math.floor(save.activeSlot)));
@@ -1203,6 +1399,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     keepRegen = 0.6;
     vaultVisit = false;
     raid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
+    keepDefense = { active: false, wave: 0, hp: 70, maxHp: 70, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
     talkNpc = null;
     lastAsk = "";
     mode = "play";
@@ -2031,11 +2228,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     keepDmg = built.has("forge") ? 3 : 0;
     keepRegen = built.has("tower") ? 2.2 : 0.6;
     mods.luck = (owned.has("luck") ? 1.6 : 1) * (built.has("vault") ? 1.15 : 1);
+    keepDefense.maxHp = fortressMaxHp();
+    if (!keepDefense.active && keepDefense.hp > 0) keepDefense.hp = keepDefense.maxHp;
   }
 
   function warp(to: MapId, c: number, r: number, msg?: string) {
     if (raid.active && map === "isle" && to !== "isle") {
       say("Нельзя бросить гавань во время штурма.");
+      emit(true);
+      return;
+    }
+    if (keepDefense.active && map === "keep" && to !== "keep") {
+      say("Нельзя бросить Двор во время ночного дозора.");
       emit(true);
       return;
     }
@@ -2208,6 +2412,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function rest() {
+    if (keepDefense.active && map === "keep") {
+      say("Во время осады отдыхать нельзя. Сначала удержи очаг.");
+      emit(true);
+      return;
+    }
     const plot = siteAt(map, tileC(), tileR());
     const pick = plot ? raised.get(plot.id) : undefined;
     const opt = plot?.options.find((o) => o.id === pick);
@@ -2252,6 +2461,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       say("Нельзя бросить гавань во время штурма.");
       if (ex.to === "grotto") px -= 28;
       else py -= 28;
+      exitLock = 0.5;
+      emit(true);
+      return;
+    }
+    if (map === "keep" && keepDefense.active) {
+      say("Ворота заперты до рассвета. Двор нельзя бросить.");
+      py -= 28;
       exitLock = 0.5;
       emit(true);
       return;
@@ -2492,9 +2708,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         continue;
       }
       const playerDist = Math.hypot(px - m.x, py - m.y);
-      const attacksHaven = raid.active && m.kind === "raider" && playerDist >= 76;
-      const targetX = attacksHaven ? 13 * TILE + 16 : px;
-      const targetY = attacksHaven ? 17 * TILE + 16 : py;
+      const attacksKeep = keepDefense.active && m.kind === "raider" && m.map === "keep";
+      const attacksHaven = !attacksKeep && raid.active && m.kind === "raider" && playerDist >= 76;
+      const targetX = attacksKeep ? 3 * TILE + 16 : attacksHaven ? 13 * TILE + 16 : px;
+      const targetY = attacksKeep ? 3 * TILE + 16 : attacksHaven ? 17 * TILE + 16 : py;
       const dx = targetX - m.x;
       const dy = targetY - m.y;
       const dist = Math.hypot(dx, dy);
@@ -2506,24 +2723,29 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         shake = 0.55;
       }
 
-      const reach = m.kind === "brine" ? 68 : attacksHaven ? 30 : 22;
+      const reach = m.kind === "brine" ? 68 : attacksHaven || attacksKeep ? 30 : 22;
       if (m.windup > 0) {
         m.windup = Math.max(0, m.windup - dt);
         if (m.windup <= 0) {
           const hitsHaven = m.attackTarget === "haven";
-          const hitX = hitsHaven ? 13 * TILE + 16 : px;
-          const hitY = hitsHaven ? 17 * TILE + 16 : py;
+          const hitsKeep = m.attackTarget === "keep";
+          const hitX = hitsKeep ? 3 * TILE + 16 : hitsHaven ? 13 * TILE + 16 : px;
+          const hitY = hitsKeep ? 3 * TILE + 16 : hitsHaven ? 17 * TILE + 16 : py;
           const hitDx = hitX - m.x;
           const hitDy = hitY - m.y;
           const hitDist = Math.hypot(hitDx, hitDy);
-          const hitReach = m.kind === "brine" ? 68 : hitsHaven ? 30 : 22;
+          const hitReach = m.kind === "brine" ? 68 : hitsHaven || hitsKeep ? 30 : 22;
           const attackColor = m.kind === "brine" ? "#9ed8d0" : m.kind === "wraith" ? "#b89ad8" : m.kind === "crab" ? "#d8a06a" : "#d58a78";
           m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : 0.85;
           if (hitDist < hitReach + 18) {
             addSlash(m.x, m.y, Math.atan2(hitDy, hitDx), m.kind === "brine" ? 62 : 34, attackColor, "enemy", 0.24);
             burst(m.x + hitDx * 0.55, m.y + hitDy * 0.55, attackColor, m.kind === "brine" ? 22 : 8);
             shake = Math.max(shake, m.kind === "brine" ? 0.28 : 0.14);
-            if (hitsHaven) {
+            if (hitsKeep) {
+              keepDefense.hp = Math.max(0, keepDefense.hp - MOB[m.kind].atk);
+              float(hitX + (Math.random() - 0.5) * 30, hitY - 20, `-${MOB[m.kind].atk}`, "#e8c070");
+              audio.hit();
+            } else if (hitsHaven) {
               raid.havenHp = Math.max(0, raid.havenHp - MOB[m.kind].atk);
               float(hitX + (Math.random() - 0.5) * 30, hitY - 20, `-${MOB[m.kind].atk}`, "#c17a6a");
               audio.hit();
@@ -2544,7 +2766,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
 
       if (dist < aggro && dist > 18) {
-        const sp = (m.kind === "wolf" ? 70 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) * (m.slow > 0 ? 0.4 : 1);
+        const sp =
+          (m.kind === "wolf" ? 70 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) *
+          (m.slow > 0 ? 0.4 : 1) *
+          (attacksKeep && built.has("gate") ? 0.62 : 1);
         const mx2 = m.x + (dx / dist) * sp * dt;
         const my2 = m.y + (dy / dist) * sp * dt;
         if (!solidAt(mx2, m.y)) m.x = mx2;
@@ -2564,7 +2789,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (dist < reach && m.atkCd <= 0) {
         m.windupMax = m.kind === "brine" ? 0.78 : m.kind === "orc" ? 0.5 : m.kind === "wraith" ? 0.42 : 0.34;
         m.windup = m.windupMax;
-        m.attackTarget = attacksHaven ? "haven" : "player";
+        m.attackTarget = attacksKeep ? "keep" : attacksHaven ? "haven" : "player";
       }
     }
 
@@ -2595,6 +2820,43 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           } else {
             raid.nextWave -= dt;
             if (raid.nextWave <= 0) spawnRaidWave(raid.wave + 1);
+          }
+        }
+      }
+    }
+
+    if (keepDefense.active) {
+      if (keepDefense.hp <= 0) {
+        failKeepDefense();
+      } else {
+        const raiders = liveKeepRaiders();
+        if (raiders.length > 0 && (built.has("tower") || built.has("barracks"))) {
+          keepDefense.towerCd -= dt;
+          if (keepDefense.towerCd <= 0) {
+            keepDefense.towerCd = built.has("tower") ? 1.05 : 1.45;
+            const guard = built.has("tower") ? BUILDINGS.find((building) => building.id === "tower") : BUILDINGS.find((building) => building.id === "barracks");
+            const gx = (guard?.c ?? 5) * TILE + 16;
+            const gy = (guard?.r ?? 5) * TILE + 16;
+            const target = raiders.reduce((best, candidate) =>
+              Math.hypot(candidate.x - 3 * TILE - 16, candidate.y - 3 * TILE - 16) < Math.hypot(best.x - 3 * TILE - 16, best.y - 3 * TILE - 16)
+                ? candidate
+                : best,
+            );
+            const damage = (built.has("tower") ? 10 : 0) + (built.has("barracks") ? 6 : 0) + (built.has("forge") ? 3 : 0);
+            addSlash(gx, gy, Math.atan2(target.y - gy, target.x - gx), 72, built.has("tower") ? "#9ec4e8" : "#e8c070", "arc", 0.28);
+            burst(target.x, target.y, built.has("tower") ? "#9ec4e8" : "#e8c070", 9);
+            hurtMob(target, damage);
+          }
+        }
+        if (liveKeepRaiders().length === 0) {
+          if (keepDefense.wave >= 3) {
+            finishKeepDefense();
+          } else if (keepDefense.nextWave <= 0) {
+            keepDefense.nextWave = 4;
+            say(`Волна ${keepDefense.wave} отбита. У очага четыре секунды тишины.`);
+          } else {
+            keepDefense.nextWave -= dt;
+            if (keepDefense.nextWave <= 0) spawnKeepWave(keepDefense.wave + 1);
           }
         }
       }
@@ -3261,8 +3523,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       if (m.windup > 0 && m.windupMax > 0) {
         const charged = 1 - m.windup / m.windupMax;
-        const targetX = m.attackTarget === "haven" ? 13 * TILE + 16 : px;
-        const targetY = m.attackTarget === "haven" ? 17 * TILE + 16 : py;
+        const targetX = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "haven" ? 13 * TILE + 16 : px;
+        const targetY = m.attackTarget === "keep" ? 3 * TILE + 16 : m.attackTarget === "haven" ? 17 * TILE + 16 : py;
         const attackAng = Math.atan2(targetY - m.y, targetX - m.x);
         ctx.setLineDash([]);
         ctx.globalAlpha = 0.18 + charged * 0.28;
@@ -4069,6 +4331,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     },
     build: doBuild,
     rest,
+    tendHearth,
+    startKeepDefense,
     toggleInv() {
       if (mode === "inv") mode = "play";
       else if (mode === "play") mode = "inv";

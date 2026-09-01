@@ -1216,3 +1216,200 @@ img.talk-face {
     0 1px 2px rgb(10 12 16 / 0.95),
     0 0 12px rgb(10 12 16 / 0.6);
 }
+
+.oath-menu {
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 50% 78%, rgb(171 96 51 / 0.22), transparent 24rem),
+    linear-gradient(to bottom, rgb(8 11 14 / 0.58), rgb(8 10 12 / 0.9));
+}
+
+.menu-embers {
+  position: absolute;
+  inset: 45% 0 0;
+  z-index: -1;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(circle, #e7a15e 0 1px, transparent 1.5px),
+    radial-gradient(circle, #d9b879 0 1px, transparent 1.5px);
+  background-position: 17% 80%, 73% 65%;
+  background-size: 7rem 9rem, 11rem 13rem;
+  mask-image: linear-gradient(to top, black, transparent 85%);
+  animation: menu-embers-rise 12s linear infinite;
+}
+
+@keyframes menu-embers-rise {
+  to { background-position: 17% -10%, 73% -25%; }
+}
+
+.menu-save-card {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr) auto;
+  align-items: center;
+  width: min(43rem, 100%);
+  min-height: 6.5rem;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 0.75rem 0.9rem 0.75rem 0;
+  border: 1px solid rgb(217 184 121 / 0.38);
+  border-radius: var(--radius-md);
+  background: linear-gradient(120deg, rgb(42 30 21 / 0.92), rgb(10 12 16 / 0.95) 65%);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.42), inset 0 1px rgb(255 255 255 / 0.05);
+}
+
+.menu-save-portrait {
+  width: 5rem;
+  height: 6.5rem;
+  align-self: end;
+  object-fit: contain;
+  object-position: bottom;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.58));
+}
+
+.menu-choice-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.4rem;
+  color: var(--color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+}
+
+.menu-choice-divider::before,
+.menu-choice-divider::after {
+  width: 5rem;
+  height: 1px;
+  flex: 1;
+  content: "";
+  background: linear-gradient(to right, transparent, var(--color-border-strong));
+}
+
+.menu-choice-divider::after { transform: scaleX(-1); }
+
+.fortress-hud {
+  border: 1px solid rgb(217 184 121 / 0.42);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(110deg, rgb(45 31 20 / 0.94), rgb(10 12 16 / 0.94));
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.45), 0 0 24px rgb(217 184 121 / 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.fortress-health {
+  background: linear-gradient(90deg, #9d613c, #edc676);
+  box-shadow: 0 0 10px rgb(237 198 118 / 0.34);
+}
+
+.fortress-card {
+  padding: 1rem;
+  border: 1px solid rgb(217 184 121 / 0.3);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(circle at 8% 20%, rgb(203 119 66 / 0.14), transparent 12rem),
+    linear-gradient(125deg, rgb(39 29 21 / 0.74), rgb(13 15 16 / 0.74));
+}
+
+.fortress-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.fortress-seal {
+  display: grid;
+  width: 2.8rem;
+  height: 2.8rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgb(217 184 121 / 0.34);
+  border-radius: 999px;
+  color: #e1bb75;
+  background: rgb(10 12 16 / 0.42);
+}
+
+.fortress-seal svg { width: 1.2rem; }
+
+.fortress-metrics {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.fortress-metrics span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.fortress-metrics svg { width: 0.8rem; height: 0.8rem; }
+.fortress-metrics b { color: var(--color-fg); }
+
+.fortress-wall {
+  height: 0.38rem;
+  margin-top: 0.8rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(7 8 9 / 0.65);
+}
+
+.fortress-wall i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #995638, #e0b76d);
+  transition: width 160ms ease-out;
+}
+
+.fortress-story {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+  color: #d8c7a8;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.fortress-story svg {
+  width: 1rem;
+  flex: none;
+  color: #db965c;
+}
+
+.fortress-help {
+  margin-top: 0.7rem;
+  color: var(--color-subtle);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.fortress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .menu-save-card {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    padding-right: 0.75rem;
+  }
+  .menu-save-card button { grid-column: 1 / -1; margin: 0 0.2rem 0.2rem; }
+  .menu-save-portrait { width: 4rem; height: 5.5rem; }
+  .fortress-card-head { align-items: flex-start; }
+  .fortress-metrics { flex-direction: column; }
+  .fortress-actions > button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-embers { animation: none; }
+}
