@@ -173,7 +173,16 @@ export default defineConfig(({ command, isPreview }) => ({
     tailwindcss(),
     tanstackStart({
       server: { entry: "server/index" },
-      ...(process.env.VERCEL === "1" ? {} : { spa: { enabled: true, prerender: { outputPath: "/index" } } }),
+      ...(process.env.VERCEL === "1"
+        ? {}
+        : {
+            // Sites serves this single prerendered document for every game URL.
+            // Render the real `/` route instead of an empty SPA shell so React
+            // can hydrate in place without throwing the menu away on startup.
+            spa: { enabled: false },
+            pages: [{ path: "/", prerender: { enabled: true } }],
+            prerender: { enabled: true },
+          }),
     }),
     ...((command === "build" || isPreview) && process.env.VERCEL === "1"
       ? [
