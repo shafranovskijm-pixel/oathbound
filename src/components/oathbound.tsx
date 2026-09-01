@@ -46,6 +46,7 @@ const IDLE: Snapshot = {
   equipment: { wep: "sword", arm: "leather", cloak: null, helm: null },
   tide: null,
   haven: null,
+  raid: null,
   guise: "oath",
   goldFlash: 0,
   activeSlot: 0,
@@ -391,6 +392,21 @@ export function Oathbound() {
               <button type="button" className="hud-slot" onClick={() => g.current?.pause()} aria-label="Пауза" title="Пауза">
                 <Menu className="size-5" />
               </button>
+            </div>
+          </div>
+        ) : null}
+
+        {playing && snap.raid?.active ? (
+          <div className="absolute top-3 left-1/2 w-[min(24rem,48vw)] -translate-x-1/2 rounded-md border border-danger/50 bg-bg/90 px-4 py-2 shadow-lg backdrop-blur-sm hud-ink">
+            <div className="flex items-center justify-between gap-3 font-mono text-[10px] tracking-widest">
+              <span className="text-danger">ШТУРМ · {snap.raid.status}</span>
+              <span className="tabular-nums text-muted">{Math.ceil(snap.raid.havenHp)}/{snap.raid.maxHavenHp}</span>
+            </div>
+            <div className="stat-bar mt-1.5 h-2">
+              <i
+                className="bg-danger transition-[width] duration-150"
+                style={{ width: `${snap.raid.maxHavenHp ? Math.max(0, (snap.raid.havenHp / snap.raid.maxHavenHp) * 100) : 0}%` }}
+              />
             </div>
           </div>
         ) : null}

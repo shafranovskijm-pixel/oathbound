@@ -25,10 +25,20 @@ export type SavedMob = {
   flash: number;
 };
 
+export type SavedRaid = {
+  active: boolean;
+  wave: number;
+  havenHp: number;
+  maxHavenHp: number;
+  nextWave: number;
+  towerCd: number;
+};
+
 export type GameSave = {
   version: typeof SAVE_VERSION;
   updatedAt: number;
   worldTime?: number;
+  raid?: SavedRaid;
   mode: SavedMode;
   heroId: HeroId;
   map: MapId;
@@ -70,7 +80,7 @@ type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const HERO_IDS = new Set(["aldric", "vessa", "kael"]);
 const MAP_IDS = new Set(["over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
 const MODES = new Set(["play", "talent", "dead", "win"]);
-const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine"]);
+const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine", "raider"]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -110,6 +120,14 @@ function validMob(value: unknown) {
   );
 }
 
+function validRaid(value: unknown) {
+  if (!record(value)) return false;
+  return (
+    typeof value.active === "boolean" &&
+    [value.wave, value.havenHp, value.maxHavenHp, value.nextWave, value.towerCd].every(finite)
+  );
+}
+
 export function decodeGameSave(raw: string | null): GameSave | null {
   if (!raw) return null;
   try {
@@ -117,6 +135,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     if (!record(value)) return null;
     if (value.version !== SAVE_VERSION || !finite(value.updatedAt)) return null;
     if (value.worldTime !== undefined && !finite(value.worldTime)) return null;
+    if (value.raid !== undefined && !validRaid(value.raid)) return null;
     if (typeof value.mode !== "string" || !MODES.has(value.mode)) return null;
     if (typeof value.heroId !== "string" || !HERO_IDS.has(value.heroId)) return null;
     if (typeof value.map !== "string" || !MAP_IDS.has(value.map)) return null;

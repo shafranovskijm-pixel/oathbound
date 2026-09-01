@@ -10,7 +10,7 @@ import {
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, SITES, gatherNodeAt, siteAt, type SiteId } from "./data";
-import { readGameSave, writeGameSave, type GameSave, type SavedMode } from "./save";
+import { readGameSave, writeGameSave, type GameSave, type SavedMode, type SavedRaid } from "./save";
 import {
   EXITS,
   MAP_SIZE,
@@ -64,6 +64,7 @@ export type Snapshot = {
   equipment: Record<Slot, ItemId | null>;
   tide: { label: string; level: number } | null;
   haven: { name: string; effect: string } | null;
+  raid: { active: boolean; wave: number; havenHp: number; maxHavenHp: number; nextWave: number; status: string } | null;
   guise: Guise;
   goldFlash: number;
   activeSlot: number;
@@ -278,6 +279,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let keepDmg = 0;
   let keepRegen = 0.6;
   let vaultVisit = false;
+  let raid: SavedRaid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
   const log: string[] = [];
   let hint = "WASD ход · E действие · Пробел удар · 1 2 3 магия";
   let talkNpc: Npc | null = null;
@@ -443,6 +445,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return raised.get("haven") ?? null;
   }
 
+  function activeHavenChoice() {
+    return flags.has("havenBroken") ? null : havenChoice();
+  }
+
   function islandMap() {
     return map === "isle" || map === "grotto";
   }
@@ -456,7 +462,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function recipeGold(r: (typeof CRAFT)[number]) {
-    return Math.max(0, r.gold - (havenChoice() === "saltworks" ? 4 : 0));
+    return Math.max(0, r.gold - (activeHavenChoice() === "saltworks" ? 4 : 0));
   }
 
   function havenStatus() {
@@ -464,6 +470,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (!choice) return null;
     const option = SITES.find((site) => site.id === "haven")?.options.find((candidate) => candidate.id === choice);
     if (!option) return null;
+    if (flags.has("havenBroken")) return { name: option.name, effect: "РАЗРУШЕНО · ремонт у Эйры" };
     const effect =
       choice === "turfhouse"
         ? "Расход еды на острове −45%"
@@ -471,6 +478,68 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           ? "Крафт −4 зол. · +1 ресурс"
           : "+3 урона на острове · маяк";
     return { name: option.name, effect };
+  }
+
+  function liveRaiders() {
+    return mobs.filter((mob) => mob.map === "isle" && mob.kind === "raider" && mob.hp > 0);
+  }
+
+  function raidSpawns(wave: number) {
+    const points =
+      wave === 1
+        ? [[7, 18], [21, 20], [6, 13]]
+        : wave === 2
+          ? [[23, 17], [28, 12], [9, 16], [21, 20]]
+          : [[6, 13], [7, 18], [23, 17], [29, 16], [18, 8]];
+    for (const [c, r] of points) mobs.push(mkMob("isle", c, r, "raider"));
+  }
+
+  function spawnRaidWave(wave: number) {
+    raid.wave = wave;
+    raid.nextWave = 0;
+    raidSpawns(wave);
+    say(`Штурм гавани: волна ${wave} из 3.`);
+    burst(13 * TILE + 16, 17 * TILE + 16, wave === 3 ? "#e07a4a" : "#c8d0c4", 24);
+  }
+
+  function startHavenRaid() {
+    const choice = activeHavenChoice();
+    if (!choice || raid.active) return;
+    const maxHavenHp = choice === "turfhouse" ? 130 : choice === "stormfire" ? 110 : 100;
+    raid = { active: true, wave: 0, havenHp: maxHavenHp, maxHavenHp, nextWave: 0, towerCd: 1.5 };
+    flags.add("raidStarted");
+    flags.delete("raidFailed");
+    if (choice === "saltworks") {
+      give("potion");
+      give("potion");
+      say("Эйра выставила два соляных зелья из запасов мастерской.");
+    }
+    spawnRaidWave(1);
+    mode = "play";
+    talkNpc = null;
+    audio.ok();
+  }
+
+  function failHavenRaid() {
+    raid.active = false;
+    flags.add("havenBroken");
+    flags.add("raidFailed");
+    for (const mob of liveRaiders()) mob.hp = 0;
+    say("Гавань разбита. Постройка не даёт бонусов, пока Эйра её не починит.");
+    shake = 0.8;
+    burst(13 * TILE + 16, 17 * TILE + 16, "#c17a6a", 38);
+    audio.hurt();
+  }
+
+  function finishHavenRaid() {
+    raid.active = false;
+    flags.add("raidWon");
+    flags.delete("raidFailed");
+    gold += 60;
+    give("keelsigil");
+    say("Гавань устояла. +60 золота · Знак Соляного киля.");
+    burst(13 * TILE + 16, 17 * TILE + 16, "#f0d58a", 46);
+    audio.ok();
   }
 
   function canMake(r: (typeof CRAFT)[number]) {
@@ -541,6 +610,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       {
         text: flags.has("eiraQuest") ? `Очистить берег для Эйры (${eiraKills}/4)` : "Поговорить с Эйрой после основания гавани",
         done: flags.has("eiraDone"),
+      },
+      {
+        text: raid.active
+          ? `Отбить штурм гавани (волна ${raid.wave}/3)`
+          : flags.has("havenBroken")
+            ? "Починить разрушенную гавань у Эйры"
+            : "Защитить гавань от морских налётчиков",
+        done: flags.has("raidWon"),
       },
       { text: "Сковать островное снаряжение", done: has("harpoon") || has("stormcloak") || has("shellmail") || has("tidehelm") },
     ];
@@ -627,6 +704,23 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       equipment: { ...worn },
       tide: map === "isle" || map === "grotto" ? tideState() : null,
       haven: havenStatus(),
+      raid:
+        raid.active || flags.has("havenBroken") || flags.has("raidWon")
+          ? {
+              active: raid.active,
+              wave: raid.wave,
+              havenHp: raid.havenHp,
+              maxHavenHp: raid.maxHavenHp,
+              nextWave: raid.nextWave,
+              status: raid.active
+                ? raid.nextWave > 0
+                  ? `Следующая волна через ${Math.ceil(raid.nextWave)}`
+                  : `Волна ${raid.wave}/3`
+                : flags.has("raidWon")
+                  ? "Гавань защищена"
+                  : "Гавань разрушена",
+            }
+          : null,
       guise: guise(),
       goldFlash,
       activeSlot,
@@ -709,6 +803,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       stones: [...stones],
       fieldPortal: fieldPortal ? { ...fieldPortal } : null,
       vaultVisit,
+      raid: { ...raid },
       log: [...log],
       activeSlot,
       mobs: mobs.map((mob) => ({ ...mob })),
@@ -771,6 +866,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     save.stones.filter((id) => WAYPOINTS.some((waypoint) => waypoint.id === id)).forEach((id) => stones.add(id));
     fieldPortal = save.fieldPortal ? { ...save.fieldPortal } : null;
     vaultVisit = save.vaultVisit;
+    raid = save.raid
+      ? {
+          active: save.raid.active,
+          wave: Math.max(0, Math.min(3, Math.floor(save.raid.wave))),
+          havenHp: Math.max(0, save.raid.havenHp),
+          maxHavenHp: Math.max(0, save.raid.maxHavenHp),
+          nextWave: Math.max(0, save.raid.nextWave),
+          towerCd: Math.max(0, save.raid.towerCd),
+        }
+      : { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
     log.length = 0;
     log.push(...save.log.slice(-10));
     activeSlot = Math.max(-1, Math.min(2, Math.floor(save.activeSlot)));
@@ -923,6 +1028,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     keepDmg = 0;
     keepRegen = 0.6;
     vaultVisit = false;
+    raid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
     talkNpc = null;
     lastAsk = "";
     mode = "play";
@@ -994,7 +1100,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (n.id === "ryn" && g === "pirate" && level < 3) {
       talkText = "«Кушак вижу. Крови мало. Волки на берегу ещё не знают твоего имени. Приди третьим.»";
     }
-    if (n.id === "ryn" && has("tidehelm")) {
+    if (n.id === "ryn" && has("keelsigil")) {
+      talkText = "«Знак Киля не покупают. Ты удержал бухту — теперь можно говорить о море дальше острова.»";
+    } else if (n.id === "ryn" && has("tidehelm")) {
       talkText = "«Венец отлива. Теперь море смотрит через тебя. Только не реши, что оно стало твоим.»";
     } else if (n.id === "ryn" && has("stormheart")) {
       talkText = "«Слышу стук даже через доски. Сердце хранителя. Соляная мастерская знает, какой венец из него выковать.»";
@@ -1003,7 +1111,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     if (n.id === "eira") {
       const killed = islandCrabKills();
-      if (flags.has("eiraDone")) talkText = `«${ITEM[eiraReward()].name} тебе идёт. Теперь бухта знает своего хозяина.»`;
+      if (flags.has("havenBroken")) talkText = "«Доски в воде, очаг залит. Двадцать золотых — и мы поднимем гавань снова.»";
+      else if (raid.active) talkText = `«Волна ${raid.wave} из 3. У гавани ${Math.ceil(raid.havenHp)} из ${raid.maxHavenHp}. Не стой здесь — к берегу!»`;
+      else if (flags.has("raidWon")) talkText = "«Три лодки пришли из тумана. Ни одна не ушла. Теперь это не лагерь — это наша гавань.»";
+      else if (flags.has("eiraDone")) talkText = `«${ITEM[eiraReward()].name} тебе идёт. Теперь бухта знает своего хозяина.»`;
       else if (flags.has("eiraQuest")) talkText = `«Панцирники: ${Math.min(4, killed)} из 4. Берег считает кровь точнее нас.»`;
       else talkText = `«${havenStatus()?.name ?? "Крыша"} стоит. Теперь посмотрим, способен ли ты удержать бухту.»`;
     }
@@ -1084,6 +1195,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
+    if (n.id === "ryn" && key === "RAID") {
+      talkText = has("keelsigil")
+        ? "«Знак открывает место за моим столом. Следом будут морские рейды — короткие выходы, где один держит палубу, а другой идёт за добычей.»"
+        : "«Удержи гавань Эйры против трёх лодок. Вернёшься со знаком — поговорим о дальнем море.»";
+      audio.talk();
+      emit(true);
+      return;
+    }
     if (n.id === "eira" && key === "HAVEN") {
       const status = havenStatus();
       talkText = status ? `«${status.name}. ${status.effect}. Выбор уже меняет бухту.»` : "«Сначала поставь здесь хоть одну крышу.»";
@@ -1112,6 +1231,40 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
+    if (n.id === "eira" && key === "RAID") {
+      if (!flags.has("eiraDone")) {
+        talkText = "«Сначала очисти берег. В драке с панцирниками я пойму, умеешь ли ты держать линию.»";
+      } else if (flags.has("raidWon")) {
+        talkText = "«Мы уже выстояли. Знак Киля у тебя — бухта это помнит.»";
+      } else if (flags.has("havenBroken")) {
+        talkText = "«Сначала ремонт. На щепках оборону не держат.»";
+      } else if (raid.active) {
+        talkText = `«Волна ${raid.wave} из 3. Гавань: ${Math.ceil(raid.havenHp)} из ${raid.maxHavenHp}.»`;
+      } else {
+        talkText = "«Тогда начинаем. Три лодки, пауза между волнами. Налётчики идут к гавани, но перехватят тебя, если подойдёшь близко.»";
+        startHavenRaid();
+      }
+      emit(true);
+      return;
+    }
+    if (n.id === "eira" && key === "REPAIR") {
+      if (!flags.has("havenBroken")) {
+        talkText = "«Чинить пока нечего. Лучше укрепи руки.»";
+      } else if (gold < 20) {
+        talkText = "«Нужно двадцать золотых на дерево, смолу и новые петли.»";
+      } else {
+        gold -= 20;
+        flags.delete("havenBroken");
+        flags.delete("raidFailed");
+        raid = { active: false, wave: 0, havenHp: 0, maxHavenHp: 0, nextWave: 0, towerCd: 0 };
+        talkText = "«Гавань снова стоит. Когда будешь готов — спроси о налёте.»";
+        say("Гавань восстановлена. Её бонусы снова действуют.");
+        burst(13 * TILE + 16, 17 * TILE + 16, "#d8c070", 30);
+        audio.ok();
+      }
+      emit(true);
+      return;
+    }
     if (n.id === "halric" && has("codex") && (key === "CODEX" || key === "OATH")) {
       flags.add("returned");
       audio.end();
@@ -1132,7 +1285,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
   function meleeDmg() {
     let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
-    if (islandMap() && havenChoice() === "stormfire") d += 3;
+    if (islandMap() && activeHavenChoice() === "stormfire") d += 3;
     if (worn.helm === "firecrown") d += 2;
     if (markT > 0) {
       d *= 2;
@@ -1257,6 +1410,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     audio.hurt();
     if (hp <= 0) {
       hp = 0;
+      if (raid.active) failHavenRaid();
       say("Бруна вытащила тебя. Золото наполовину.");
       gold = Math.floor(gold / 2);
       hp = Math.max(6, Math.floor(maxHp / 2));
@@ -1425,7 +1579,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const node = gatherNodeAt(map, tileC(), tileR());
     if (node && !opened.has(`node:${node.id}`)) {
       opened.add(`node:${node.id}`);
-      const amount = node.amount + (havenChoice() === "saltworks" ? 1 : 0);
+      const amount = node.amount + (activeHavenChoice() === "saltworks" ? 1 : 0);
       for (let i = 0; i < amount; i++) give(node.item);
       say(`${node.label}. +${amount} · ${ITEM[node.item].name}.`);
       burst(node.c * TILE + 16, node.r * TILE + 16, "#d8d0a8", 12);
@@ -1578,6 +1732,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function warp(to: MapId, c: number, r: number, msg?: string) {
+    if (raid.active && map === "isle" && to !== "isle") {
+      say("Нельзя бросить гавань во время штурма.");
+      emit(true);
+      return;
+    }
     map = to;
     px = c * TILE + 16;
     py = r * TILE + 16;
@@ -1779,6 +1938,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const r = tileR();
     const ex = EXITS[map].find((e) => e.c === c && e.r === r);
     if (!ex) return;
+    if (map === "isle" && raid.active) {
+      say("Нельзя бросить гавань во время штурма.");
+      if (ex.to === "grotto") px -= 28;
+      else py -= 28;
+      exitLock = 0.5;
+      emit(true);
+      return;
+    }
     if (ex.to === "crypt" && !has("key") && !has("mark")) {
       say("Дверь крипты. Ключ или знак.");
       py += 28;
@@ -1928,7 +2095,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
     if (mag > 0.2) {
       footT += dt;
-      food -= dt * 0.28 * (islandMap() && havenChoice() === "turfhouse" ? 0.55 : 1);
+      food -= dt * 0.28 * (islandMap() && activeHavenChoice() === "turfhouse" ? 0.55 : 1);
       if (footT > 0.28) {
         footT = 0;
         audio.step();
@@ -2003,19 +2170,24 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           if (m.hp <= 0) killMob(m);
         }
       }
+      if (m.hp <= 0) continue;
       if (m.stun > 0) continue;
-      const dx = px - m.x;
-      const dy = py - m.y;
+      const playerDist = Math.hypot(px - m.x, py - m.y);
+      const attacksHaven = raid.active && m.kind === "raider" && playerDist >= 76;
+      const targetX = attacksHaven ? 13 * TILE + 16 : px;
+      const targetY = attacksHaven ? 17 * TILE + 16 : py;
+      const dx = targetX - m.x;
+      const dy = targetY - m.y;
       const dist = Math.hypot(dx, dy);
-      const aggro = m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
-      if (m.kind === "brine" && dist < 260 && !flags.has("brineSeen")) {
+      const aggro = m.kind === "raider" ? Infinity : m.kind === "brine" ? 320 : m.kind === "wraith" ? 200 : 150;
+      if (m.kind === "brine" && playerDist < 260 && !flags.has("brineSeen")) {
         flags.add("brineSeen");
         say("СОЛЕВОЙ ХРАНИТЕЛЬ. Панцирь шевелится вместе со всем гротом.");
         burst(m.x, m.y, "#9ed8d0", 36);
         shake = 0.55;
       }
       if (dist < aggro && dist > 18) {
-        const sp = (m.kind === "wolf" ? 70 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) * (m.slow > 0 ? 0.4 : 1);
+        const sp = (m.kind === "wolf" ? 70 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) * (m.slow > 0 ? 0.4 : 1);
         const mx2 = m.x + (dx / dist) * sp * dt;
         const my2 = m.y + (dy / dist) * sp * dt;
         if (!solidAt(mx2, m.y)) m.x = mx2;
@@ -2032,9 +2204,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           }
         }
       }
-      const reach = m.kind === "brine" ? 68 : 22;
+      const reach = m.kind === "brine" ? 68 : attacksHaven ? 30 : 22;
       if (dist < reach && m.atkCd <= 0) {
-        m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : 0.85;
+        m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : 0.85;
+        if (attacksHaven) {
+          raid.havenHp = Math.max(0, raid.havenHp - MOB[m.kind].atk);
+          float(targetX + (Math.random() - 0.5) * 30, targetY - 20, `-${MOB[m.kind].atk}`, "#c17a6a");
+          burst(targetX, targetY, "#c17a6a", 7);
+          shake = Math.max(shake, 0.16);
+          audio.hit();
+          continue;
+        }
         if (m.kind === "brine") {
           burst(m.x, m.y, "#8fbeb8", 24);
           slashes.push({ x: m.x, y: m.y, ang: Math.atan2(dy, dx), r: 58, t: 0.18, color: "#9ed8d0" });
@@ -2046,6 +2226,38 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           }
         }
         hurtPlayer(MOB[m.kind].atk);
+      }
+    }
+
+    if (raid.active) {
+      if (raid.havenHp <= 0) {
+        failHavenRaid();
+      } else {
+        const raiders = liveRaiders();
+        if (activeHavenChoice() === "stormfire" && raiders.length > 0) {
+          raid.towerCd -= dt;
+          if (raid.towerCd <= 0) {
+            raid.towerCd = 1.35;
+            const hx = 13 * TILE + 16;
+            const hy = 17 * TILE + 16;
+            const target = raiders.reduce((best, candidate) =>
+              Math.hypot(candidate.x - hx, candidate.y - hy) < Math.hypot(best.x - hx, best.y - hy) ? candidate : best,
+            );
+            slashes.push({ x: hx, y: hy, ang: Math.atan2(target.y - hy, target.x - hx), r: 64, t: 0.18, color: "#e07a4a" });
+            hurtMob(target, 8);
+          }
+        }
+        if (liveRaiders().length === 0) {
+          if (raid.wave >= 3) {
+            finishHavenRaid();
+          } else if (raid.nextWave <= 0) {
+            raid.nextWave = 4;
+            say(`Волна ${raid.wave} отбита. Четыре секунды до следующей.`);
+          } else {
+            raid.nextWave -= dt;
+            if (raid.nextWave <= 0) spawnRaidWave(raid.wave + 1);
+          }
+        }
       }
     }
 
@@ -2481,6 +2693,24 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (opt.sprite === "keep" && imgs.keep) sheetGrid(imgs.keep, opt.frame, 3, 2, p.x, p.y, 48);
       else if (imgs[opt.sprite]) blit(imgs[opt.sprite], p.x, p.y, 46, 40);
       else sheet(imgs.props, 1, p.x, p.y, 40);
+      if (s.id === "haven" && flags.has("havenBroken")) {
+        ctx.save();
+        ctx.globalAlpha = 0.38;
+        ctx.fillStyle = "#181412";
+        for (let i = 0; i < 3; i++) {
+          const drift = Math.sin(time * (1.4 + i * 0.2) + i) * 5;
+          ctx.beginPath();
+          ctx.arc(p.x + 16 + i * 8 + drift, p.y + 14 - i * 9, 8 + i * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.strokeStyle = "#c17a6a";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 7, p.y + 37);
+        ctx.lineTo(p.x + 40, p.y + 19);
+        ctx.stroke();
+        ctx.restore();
+      }
       if (opt.craft || opt.rest) drawInteractionPulse(s.c * TILE + 16, s.r * TILE + 16, opt.craft ? "Мастерская" : "Отдохнуть");
     }
     if (map === "keep") {
@@ -2558,9 +2788,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.save();
       if (m.flash > 0) ctx.filter = "brightness(2.4)";
       else if (boss) ctx.filter = "hue-rotate(155deg) saturate(0.72) brightness(0.86)";
+      else if (m.kind === "raider") ctx.filter = "hue-rotate(205deg) saturate(1.45) brightness(0.82)";
       if (m.kind === "crab" || boss) sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, size);
       else sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, size);
       ctx.restore();
+      if (m.kind === "raider") {
+        ctx.strokeStyle = `rgba(193,122,106,${0.5 + Math.sin(time * 5 + m.id) * 0.18})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(s.x + 17, s.y + 30, 15, 6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (boss) {
         ctx.strokeStyle = `rgba(158,216,208,${0.45 + Math.sin(time * 4) * 0.18})`;
         ctx.lineWidth = 3;

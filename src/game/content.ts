@@ -30,7 +30,8 @@ export type ItemId =
   | "tidehelm"
   | "havenhood"
   | "saltvisor"
-  | "firecrown";
+  | "firecrown"
+  | "keelsigil";
 
 export type NpcId = "halric" | "bruna" | "soren" | "lyra" | "edric" | "mira" | "oskar" | "ryn" | "eira";
 export type Slot = "wep" | "arm" | "cloak" | "helm";
@@ -67,6 +68,7 @@ export const ITEM: Record<ItemId, { name: string; desc: string; slot?: Slot }> =
   havenhood: { name: "Капюшон гавани", desc: "Плотная шерсть, пропитанная солью и дымом очага.", slot: "helm" },
   saltvisor: { name: "Соляное забрало", desc: "Светлая пластина мастера. Не слепнет от морской пены.", slot: "helm" },
   firecrown: { name: "Корона штормового огня", desc: "Медные зубцы удерживают искру маяка.", slot: "helm" },
+  keelsigil: { name: "Знак Соляного киля", desc: "Медная пластина защитника гавани. Открывает путь к морским рейдам." },
 };
 
 export type Npc = {
@@ -212,6 +214,7 @@ export const NPCS: Npc[] = [
       SAIL: "Море берёт тех, кого суша выплюнула. Скажи — и не блюй.",
       STEAL: "Пальцы считаю. Кушак на бочке — не мой. Бери, если тень твоя.",
       WARDEN: "Под приливным камнем есть пасть. Солевой хранитель помнит корабли, которых уже нет. Вернёшься с его сердцем — море признает тебя.",
+      RAID: "Если удержишь гавань от налётчиков, киль даст тебе свой знак. С ним капитаны открывают не только двери — целые маршруты.",
     },
   },
   {
@@ -227,6 +230,8 @@ export const NPCS: Npc[] = [
       HAVEN: "Дом кормит людей. Мастерская кормит ремесло. Огонь зовёт корабли — вместе с теми, кого лучше не звать.",
       WORK: "Панцирники расплодились на берегу. Четырёх будет достаточно, чтобы остальные снова боялись света.",
       WARDEN: "Хранитель старше нашей гавани. Не буди его без приливного камня и хорошей брони.",
+      RAID: "В тумане три лодки. Они придут волнами и будут бить по гавани, пока ты занят их клинками.",
+      REPAIR: "Разбитую гавань можно поднять за двадцать золотых. Камень помнит форму лучше людей.",
     },
   },
 ];
@@ -300,7 +305,7 @@ export const GREET: Record<NpcId, Record<Guise, string>> = {
   },
 };
 
-export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab" | "brine";
+export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab" | "brine" | "raider";
 
 export const MOB: Record<
   MobKind,
@@ -312,6 +317,7 @@ export const MOB: Record<
   wraith: { name: "Призрак", hp: 28, atk: 7, xp: 40, gold: 30, sprite: 3 },
   crab: { name: "Панцирник", hp: 14, atk: 4, xp: 12, gold: 6, sprite: 0 },
   brine: { name: "Солевой хранитель", hp: 180, atk: 12, xp: 120, gold: 80, sprite: 0 },
+  raider: { name: "Морской налётчик", hp: 24, atk: 6, xp: 20, gold: 12, sprite: 0 },
 };
 
 export const SHOP: { word: string; npc: NpcId; item: ItemId; gold: number }[] = [
@@ -356,6 +362,8 @@ export const ASK: Record<string, string> = {
   WARDEN: "Что под приливным камнем?",
   HAVEN: "Что даст гавань?",
   WORK: "Чем помочь?",
+  RAID: "Кто идёт из тумана?",
+  REPAIR: "Починить гавань",
 };
 
 export const DROP: Record<MobKind, ItemId | null> = {
@@ -365,6 +373,7 @@ export const DROP: Record<MobKind, ItemId | null> = {
   wraith: null,
   crab: "shell",
   brine: "stormheart",
+  raider: "ore",
 };
 
 export const KEY_RU: Record<string, string> = {
