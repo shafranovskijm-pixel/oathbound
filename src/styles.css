@@ -102,6 +102,107 @@
   border-radius: var(--radius-md);
 }
 
+.target-card {
+  z-index: 2;
+  display: flex;
+  width: min(22.5rem, calc(100vw - 1.5rem));
+  gap: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgb(193 122 106 / 0.42);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(125deg, rgb(34 19 18 / 0.96), rgb(10 12 16 / 0.93));
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.4), inset 0 1px rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.target-portrait {
+  width: 3.2rem;
+  height: 3.2rem;
+  flex: none;
+  align-self: center;
+  border: 1px solid rgb(232 228 216 / 0.18);
+  border-radius: var(--radius-sm);
+  background-color: rgb(10 12 16 / 0.72);
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  filter: drop-shadow(0 5px 4px rgb(0 0 0 / 0.5));
+  image-rendering: pixelated;
+}
+
+.target-portrait.is-boss {
+  border-color: rgb(158 216 208 / 0.45);
+  filter: hue-rotate(155deg) saturate(0.72) brightness(0.9) drop-shadow(0 0 7px rgb(158 216 208 / 0.25));
+}
+
+.target-intent {
+  flex: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+}
+
+.target-intent.is-danger {
+  color: #ff9b82;
+  animation: target-danger 480ms ease-in-out infinite alternate;
+}
+
+.target-health,
+.target-cast {
+  overflow: hidden;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: rgb(10 8 10 / 0.66);
+}
+
+.target-health > i,
+.target-cast > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.target-health > i {
+  background: linear-gradient(90deg, #8f3f3b, #d47a68);
+  box-shadow: 0 0 8px rgb(212 122 104 / 0.35);
+  transition: width 120ms ease-out;
+}
+
+.target-cast {
+  height: 0.22rem;
+  background: rgb(90 28 22 / 0.48);
+}
+
+.target-cast > i {
+  background: #ff9b82;
+  box-shadow: 0 0 8px #ff785e;
+}
+
+.combat-status {
+  padding: 0.12rem 0.28rem;
+  border: 1px solid rgb(158 196 232 / 0.34);
+  border-radius: 999px;
+  color: #b9d8ee;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+@keyframes target-danger {
+  to {
+    opacity: 0.58;
+  }
+}
+
+@media (max-width: 900px) {
+  .target-card {
+    top: 7rem !important;
+  }
+}
+
 .status-badge {
   padding: 0.15rem 0.35rem;
   border: 1px solid var(--color-border);
@@ -238,6 +339,47 @@
   grid-template-columns: 13rem minmax(0, 1fr);
   gap: 0.75rem;
   align-items: stretch;
+}
+
+.hero-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: rgb(232 228 216 / 0.025);
+}
+
+.hero-stat-strip > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-right: 1px solid var(--color-border);
+}
+
+.hero-stat-strip > span:last-child {
+  border-right: 0;
+}
+
+.hero-stat-strip small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hero-stat-strip b {
+  color: #f0d58a;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .paper-doll {
@@ -465,6 +607,27 @@
   line-height: 1.2;
 }
 
+.gear-effects,
+.recipe-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.gear-effects b,
+.recipe-effects b {
+  padding: 0.18rem 0.34rem;
+  border: 1px solid rgb(169 196 141 / 0.3);
+  border-radius: 999px;
+  background: rgb(169 196 141 / 0.06);
+  color: #b8d39d;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
 .item-card:not(:disabled) .equip-action,
 .recipe-card.is-ready .craft-action {
   color: #f0d58a;
@@ -591,6 +754,10 @@
     max-width: calc(100vw - 6rem);
   }
 
+  .target-card {
+    width: calc(100vw - 1.5rem);
+  }
+
   .inventory-shell {
     max-height: 88vh;
   }
@@ -601,6 +768,14 @@
 
   .paper-doll {
     min-height: 9.5rem;
+  }
+
+  .hero-stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero-stat-strip > span {
+    border-bottom: 1px solid var(--color-border);
   }
 
   .recipe-card {

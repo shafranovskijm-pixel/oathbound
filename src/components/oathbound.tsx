@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import type { ItemId, Slot as EquipmentSlot } from "@/game/content";
+import { MOB, type ItemId, type Slot as EquipmentSlot } from "@/game/content";
 import { mountGame, type GameHandle, type Snapshot } from "@/game/engine";
 import { HERO_LIST, HEROES, SPELLS, type SpellId } from "@/game/heroes";
 import { MAPS } from "@/game/world";
@@ -59,6 +59,8 @@ const IDLE: Snapshot = {
   cloak: "без плаща",
   helm: "без шлема",
   equipment: { wep: "sword", arm: "leather", cloak: null, helm: null },
+  stats: { attack: 10, armor: 3, speed: 118, spell: 0, manaRegen: 0.21 },
+  target: null,
   tide: null,
   haven: null,
   raid: null,
@@ -215,6 +217,23 @@ function HeroPaperDoll({ heroId, equipment }: { heroId: keyof typeof HEROES; equ
         <p>{hero.name} · {hero.title}</p>
       </div>
     </div>
+  );
+}
+
+function MobPortrait({ kind }: { kind: NonNullable<Snapshot["target"]>["kind"] }) {
+  const sea = kind === "crab" || kind === "brine";
+  const index = sea ? 0 : MOB[kind].sprite;
+  const column = index % 2;
+  const row = Math.floor(index / 2);
+  return (
+    <span
+      className={`target-portrait ${kind === "brine" ? "is-boss" : ""}`}
+      style={{
+        backgroundImage: `url(${sea ? "/sprites/crab.png" : "/sprites/mobs.png"})`,
+        backgroundPosition: `${column * 100}% ${row * 100}%`,
+      }}
+      aria-hidden
+    />
   );
 }
 
@@ -531,6 +550,35 @@ export function Oathbound() {
           </div>
         ) : null}
 
+        {playing && snap.mode === "play" && snap.target ? (
+          <aside className={`target-card absolute left-1/2 -translate-x-1/2 ${snap.raid?.active || snap.target.kind === "brine" ? "top-16" : "top-3"}`}>
+            <MobPortrait kind={snap.target.kind} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-display text-base font-semibold leading-none">{snap.target.name}</p>
+                  <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-muted">{snap.target.attackName}</p>
+                </div>
+                <span className={`target-intent ${snap.target.windup > 0 ? "is-danger" : ""}`}>{snap.target.intent}</span>
+              </div>
+              <div className="target-health mt-2">
+                <i style={{ width: `${Math.max(0, (snap.target.hp / snap.target.maxHp) * 100)}%` }} />
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-3">
+                <span className="font-mono text-[9px] tabular-nums text-muted">{Math.ceil(snap.target.hp)} / {snap.target.maxHp} HP</span>
+                {snap.target.statuses.length ? (
+                  <span className="flex gap-1">
+                    {snap.target.statuses.map((status) => <b key={status} className="combat-status">{status}</b>)}
+                  </span>
+                ) : <span className="font-mono text-[9px] text-subtle">клик по земле — снять цель</span>}
+              </div>
+              {snap.target.windup > 0 ? (
+                <div className="target-cast mt-1.5"><i style={{ width: `${snap.target.windup * 100}%` }} /></div>
+              ) : null}
+            </div>
+          </aside>
+        ) : null}
+
         {open ? (
           <div className="absolute left-1/2 -translate-x-1/2 bottom-4 flex flex-wrap items-end justify-center gap-2 pointer-events-auto max-w-xl px-3 hud-ink">
             <Slot label="ЛКМ" name="Удар" icon={<HudIco id="melee" />} ready={snap.meleeCd} max={0.4} disabled={snap.mode !== "play"} on={snap.activeSlot < 0} onClick={() => g.current?.select(-1)} />
@@ -562,7 +610,7 @@ export function Oathbound() {
           </div>
         ) : null}
 
-        {playing && snap.mode === "play" ? (
+        {playing && snap.mode === "play" && !snap.target ? (
           <div className="world-guidance absolute left-3 top-36 w-[min(22rem,calc(100vw-1.5rem))]">
             <p className="font-mono text-[10px] tracking-[0.2em] text-accent">СЕЙЧАС</p>
             <p className="mt-1 text-sm font-medium leading-snug text-fg">{snap.hint}</p>
@@ -793,6 +841,11 @@ export function Oathbound() {
                             <div className="min-w-0">
                               <p className="font-display text-lg font-semibold leading-tight">{r.name}</p>
                               <p className="mt-1 text-xs leading-snug text-muted">{r.desc}</p>
+                              {r.effects.length ? (
+                                <span className="recipe-effects">
+                                  {r.effects.map((effect) => <b key={effect}>{effect}</b>)}
+                                </span>
+                              ) : null}
                               <p className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-subtle">
                                 {r.slot ? `Создастся и сразу наденется · ${SLOT_RU[r.slot]}` : "Создастся и попадёт в сумку"}
                               </p>
@@ -871,6 +924,13 @@ export function Oathbound() {
                     ))}
                   </div>
                 </div>
+                <div className="hero-stat-strip mt-2">
+                  <span><small>Атака</small><b>{snap.stats.attack}</b></span>
+                  <span><small>Броня</small><b>{snap.stats.armor}</b></span>
+                  <span><small>Скорость</small><b>{snap.stats.speed}</b></span>
+                  <span><small>Магия</small><b>+{snap.stats.spell}</b></span>
+                  <span><small>Мана/с</small><b>{snap.stats.manaRegen.toFixed(2)}</b></span>
+                </div>
               </section>
 
               {equipmentItems.length ? (
@@ -895,6 +955,11 @@ export function Oathbound() {
                               {item.on ? <span className="equipped-badge"><Check /> Надето</span> : null}
                             </div>
                             <p className="mt-2 text-xs leading-snug text-muted">{item.desc}</p>
+                            {item.effects.length ? (
+                              <span className="gear-effects">
+                                {item.effects.map((effect) => <b key={effect}>{effect}</b>)}
+                              </span>
+                            ) : null}
                             <span className="equip-action">
                               {item.on ? "Уже видно на герое" : "Нажми карточку, чтобы надеть"}
                               {!item.on ? <ArrowRight /> : null}
