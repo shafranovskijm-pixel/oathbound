@@ -96,7 +96,7 @@
     }
   ],
   "gatherNodes": [
-    { "id": "shoal-wood-1", "map": "shoal", "c": 9, "r": 15, "label": "Плавник у пальм", "item": "wood", "amount": 2, "sprite": 0 },
+    { "id": "shoal-wood-1", "map": "shoal", "c": 9, "r": 15, "label": "Доски у пальм", "item": "wood", "amount": 2, "sprite": 0 },
     { "id": "shoal-wood-2", "map": "shoal", "c": 12, "r": 12, "label": "Сухие доски", "item": "wood", "amount": 1, "sprite": 0 },
     { "id": "shoal-wood-3", "map": "shoal", "c": 15, "r": 14, "label": "Обломки мачты", "item": "wood", "amount": 2, "sprite": 0 },
     { "id": "shoal-cloth-1", "map": "shoal", "c": 7, "r": 11, "label": "Лоскут паруса", "item": "cloth", "amount": 1, "sprite": 2 },
