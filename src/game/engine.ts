@@ -41,7 +41,7 @@ export type Snapshot = {
   log: string[];
   hint: string;
   talk: { name: string; text: string; portrait: string; role: string; ask: string; keys: { id: string; label: string }[] } | null;
-  items: { id: ItemId; name: string; desc: string; count: number; slot?: Slot; on?: boolean }[];
+  items: { id: ItemId; name: string; desc: string; count: number; slot?: Slot; on?: boolean; effects: string[] }[];
   party: string[];
   quests: { text: string; done: boolean }[];
   spells: { id: SpellId; name: string; key: string; cost: number; ready: number }[];
@@ -62,6 +62,17 @@ export type Snapshot = {
   cloak: string;
   helm: string;
   equipment: Record<Slot, ItemId | null>;
+  stats: { attack: number; armor: number; speed: number; spell: number; manaRegen: number };
+  target: {
+    kind: MobKind;
+    name: string;
+    hp: number;
+    maxHp: number;
+    attackName: string;
+    intent: string;
+    windup: number;
+    statuses: string[];
+  } | null;
   tide: { label: string; level: number } | null;
   haven: { name: string; effect: string } | null;
   raid: { active: boolean; wave: number; havenHp: number; maxHavenHp: number; nextWave: number; status: string } | null;
@@ -73,6 +84,7 @@ export type Snapshot = {
     out: ItemId;
     name: string;
     desc: string;
+    effects: string[];
     slot?: Slot;
     gold: number;
     need: { id: ItemId; name: string; have: number; need: number; ok: boolean }[];
@@ -696,6 +708,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function snapshot(): Snapshot {
     const h = HEROES[heroId];
+    const targetMob = mobs.find((mob) => mob.id === huntId && mob.map === map && mob.hp > 0) ?? null;
+    const targetStatuses = targetMob
+      ? [targetMob.stun > 0 ? "оглушён" : "", targetMob.slow > 0 ? "замедлен" : "", targetMob.poison > 0 ? "отравлен" : ""].filter(Boolean)
+      : [];
     return {
       mode,
       hp,
@@ -725,6 +741,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         count: items.filter((candidate) => candidate === id).length,
         slot: ITEM[id].slot,
         on: worn.wep === id || worn.arm === id || worn.cloak === id || worn.helm === id,
+        effects: itemEffects(id),
       })),
       party: lyra ? [`Лира ${Math.max(0, lyraHp | 0)}`] : [],
       quests: quests(),
@@ -762,6 +779,19 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       cloak: worn.cloak ? ITEM[worn.cloak].name : "без плаща",
       helm: worn.helm ? ITEM[worn.helm].name : "без шлема",
       equipment: { ...worn },
+      stats: { attack: meleeBase(), armor: armor(), speed: Math.round(moveSpeed()), spell: spellPower(), manaRegen: manaRegen() },
+      target: targetMob
+        ? {
+            kind: targetMob.kind,
+            name: MOB[targetMob.kind].name,
+            hp: Math.max(0, targetMob.hp),
+            maxHp: targetMob.max,
+            attackName: mobAttackName(targetMob.kind),
+            intent: targetMob.windup > 0 ? "ГОТОВИТ УДАР" : targetMob.stun > 0 ? "ОГЛУШЁН" : targetMob.poison > 0 ? "ОТРАВЛЕН" : targetMob.slow > 0 ? "ЗАМЕДЛЕН" : "В БОЮ",
+            windup: targetMob.windupMax > 0 ? Math.max(0, 1 - targetMob.windup / targetMob.windupMax) : 0,
+            statuses: targetStatuses,
+          }
+        : null,
       tide: map === "isle" || map === "grotto" ? tideState() : null,
       haven: havenStatus(),
       raid:
@@ -789,6 +819,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         out: r.out,
         name: ITEM[r.out].name,
         desc: ITEM[r.out].desc,
+        effects: itemEffects(r.out),
         slot: ITEM[r.out].slot,
         gold: recipeGold(r),
         need: recipeNeeds(r),
@@ -1366,16 +1397,59 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const helmArmor = worn.helm === "tidehelm" || worn.helm === "saltvisor" ? 2 : worn.helm === "havenhood" || worn.helm === "firecrown" ? 1 : 0;
     return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + helmArmor;
   }
-  function meleeDmg() {
+  function moveSpeed() {
+    return baseSpd + mods.spd + (worn.cloak === "shroud" ? 12 : 0);
+  }
+  function spellPower() {
+    return (worn.cloak === "robe" ? 2 : worn.cloak === "stormcloak" ? 3 : 0) + (worn.helm === "tidehelm" ? 1 : worn.helm === "firecrown" ? 2 : 0);
+  }
+  function manaRegen() {
+    return keepRegen * 0.35 + (worn.cloak === "stormcloak" ? 0.15 : 0);
+  }
+  function meleeBase() {
     let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : heroId === "vessa" ? 1 : 2);
     if (islandMap() && activeHavenChoice() === "stormfire") d += 3;
     if (worn.helm === "firecrown") d += 2;
+    return d + keepDmg;
+  }
+  function meleeDmg() {
+    let d = meleeBase();
     if (markT > 0) {
       d *= 2;
       markT = 0;
     }
     if (Math.random() < mods.crit) d *= 2;
-    return d + keepDmg + ((Math.random() * 4) | 0);
+    return d + ((Math.random() * 4) | 0);
+  }
+  function itemEffects(id: ItemId) {
+    switch (id) {
+      case "sword": return ["+3 урон оружия"];
+      case "steel": return ["+5 урон оружия"];
+      case "harpoon": return ["+7 урон оружия", "дальность удара 62"];
+      case "leather": return ["+1 броня"];
+      case "chain": return ["+3 броня"];
+      case "shellmail": return ["+5 броня"];
+      case "robe": return ["+2 сила магии", "облик мага"];
+      case "shroud": return ["+12 скорость", "облик тени"];
+      case "sash": return ["доступ на Соляной киль", "облик моряка"];
+      case "stormcloak": return ["+3 сила магии", "+0.15 маны/с"];
+      case "tidehelm": return ["+2 броня", "+1 сила магии"];
+      case "havenhood": return ["+1 броня", "−20% голода на острове"];
+      case "saltvisor": return ["+2 броня"];
+      case "firecrown": return ["+1 броня", "+2 урон и магия"];
+      case "potion": return ["восстанавливает 14 HP"];
+      case "torch": return ["освещает подземелья"];
+      default: return [];
+    }
+  }
+  function mobAttackName(kind: MobKind) {
+    if (kind === "wolf") return "Укус";
+    if (kind === "orc") return "Тяжёлый тесак";
+    if (kind === "skel") return "Костяной выпад";
+    if (kind === "wraith") return "Холод могилы";
+    if (kind === "crab") return "Клешня";
+    if (kind === "raider") return "Абордажный удар";
+    return "Приливный разгром";
   }
 
   function offerTalents() {
@@ -1644,10 +1718,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const spd = id === "shot" ? 390 : id === "smite" ? 300 : id === "frost" ? 240 : 280;
       const dmg =
         id === "smite"
-          ? 8 + mods.holy + Math.floor(str / 2)
+          ? 8 + mods.holy + Math.floor(str / 2) + spellPower()
           : id === "frost"
-            ? 7 + Math.floor(maxMp / 6)
-            : 6 + Math.floor(maxMp / 5) + (heroId === "kael" ? 3 : 0);
+            ? 7 + Math.floor(maxMp / 6) + spellPower()
+            : 6 + Math.floor(maxMp / 5) + (heroId === "kael" ? 3 : 0) + (id === "shot" ? 0 : spellPower());
       const col = id === "frost" ? "#9ec4e8" : id === "smite" ? "#e8d48a" : id === "shot" ? "#c4b48a" : "#e07a4a";
       addMagic("rune", px + fx * 10, py + fy * 10, col, id === "smite" ? 25 : 19, 0.32, ang);
       burst(px + fx * 13, py + fy * 13, col, id === "shot" ? 4 : 8);
@@ -1684,7 +1758,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       shake = 0.18;
       for (const m of mobs) {
         if (m.map !== map || m.hp <= 0) continue;
-        if (Math.hypot(m.x - px, m.y - py) < rad) hurtMob(m, 10 + Math.floor(maxMp / 4), 28, Math.atan2(m.y - py, m.x - px));
+        if (Math.hypot(m.x - px, m.y - py) < rad) hurtMob(m, 10 + Math.floor(maxMp / 4) + spellPower(), 28, Math.atan2(m.y - py, m.x - px), "#e07a4a");
       }
       burst(px, py, "#e07a4a", 18);
     } else if (id === "cleave") {
@@ -2211,7 +2285,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       else dir = my < 0 ? 3 : 0;
     }
     const slow = tileAt(map, tileC(), tileR());
-    const spd = ((slow === "f" || slow === "s" ? 0.72 : 1) * (baseSpd + mods.spd));
+    const spd = ((slow === "f" || slow === "s" ? 0.72 : 1) * moveSpeed());
     vx = mx * spd;
     vy = my * spd;
     const [lx, ly] = [Math.cos(aim()), Math.sin(aim())];
@@ -2259,14 +2333,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
     if (mag > 0.2) {
       footT += dt;
-      food -= dt * 0.28 * (islandMap() && activeHavenChoice() === "turfhouse" ? 0.55 : 1);
+      const islandFood = islandMap() && activeHavenChoice() === "turfhouse" ? 0.55 : 1;
+      const hoodFood = islandMap() && worn.helm === "havenhood" ? 0.8 : 1;
+      food -= dt * 0.28 * islandFood * hoodFood;
       if (footT > 0.28) {
         footT = 0;
         audio.step();
       }
       if (Math.random() < dt * 0.2) mp = Math.min(maxMp, mp + 1);
     }
-    mp = Math.min(maxMp, mp + dt * keepRegen * 0.35);
+    mp = Math.min(maxMp, mp + dt * manaRegen());
     if (food <= 0) {
       food = 0;
       hp -= dt * 2;
@@ -3132,6 +3208,64 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (m.kind === "crab" || boss) sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, size);
       else sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, size);
       ctx.restore();
+      if (m.slow > 0) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(158,196,232,0.86)";
+        ctx.fillStyle = "rgba(216,242,255,0.82)";
+        ctx.shadowColor = "#9ec4e8";
+        ctx.shadowBlur = 7;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(feet.x, feet.y, size * 0.42, size * 0.17, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < 4; i++) {
+          const a = time * 0.8 + (i / 4) * Math.PI * 2;
+          const x = feet.x + Math.cos(a) * size * 0.42;
+          const y = feet.y - size * 0.55 + Math.sin(a) * 5;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-2.5, -2.5, 5, 5);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+      if (m.poison > 0) {
+        ctx.save();
+        ctx.fillStyle = "#8fbf72";
+        ctx.strokeStyle = "rgba(208,240,168,0.8)";
+        ctx.shadowColor = "#7ca65f";
+        ctx.shadowBlur = 6;
+        for (let i = 0; i < 3; i++) {
+          const phase = (time * (0.8 + i * 0.16) + i * 0.34) % 1;
+          const x = s.x + size * (0.3 + i * 0.2) + Math.sin(time * 4 + i) * 2;
+          const y = s.y + size * 0.65 - phase * size * 0.72;
+          ctx.globalAlpha = 1 - phase;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5 + i, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (m.stun > 0) {
+        ctx.save();
+        ctx.translate(s.x + size / 2, s.y - 5);
+        ctx.fillStyle = "#f0d58a";
+        ctx.shadowColor = "#f0d58a";
+        ctx.shadowBlur = 8;
+        for (let i = 0; i < 3; i++) {
+          const a = time * 5 + (i / 3) * Math.PI * 2;
+          const x = Math.cos(a) * size * 0.3;
+          const y = Math.sin(a) * 4;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(a);
+          ctx.fillRect(-2.5, -2.5, 5, 5);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
       if (m.kind === "raider") {
         ctx.strokeStyle = `rgba(193,122,106,${0.5 + Math.sin(time * 5 + m.id) * 0.18})`;
         ctx.lineWidth = 2;
