@@ -6,6 +6,7 @@ import {
   FlaskConical,
   Hammer,
   Leaf,
+  LockKeyhole,
   Menu,
   Package,
   ScrollText,
@@ -17,6 +18,7 @@ import {
   Volume2,
   VolumeX,
   X,
+  Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -31,8 +33,8 @@ const IDLE: Snapshot = {
   maxHp: 34,
   mp: 8,
   maxMp: 8,
-  food: 28,
-  gold: 80,
+  food: 18,
+  gold: 16,
   xp: 0,
   level: 1,
   log: [],
@@ -65,6 +67,7 @@ const IDLE: Snapshot = {
   haven: null,
   raid: null,
   guise: "oath",
+  appearance: "base",
   goldFlash: 0,
   activeSlot: 0,
   canCraft: false,
@@ -121,6 +124,14 @@ const NPC_FACE: Record<string, string> = {
 };
 
 const GUISE_RU = { oath: "клятва", mage: "маг", thief: "вор", pirate: "киль" } as const;
+const APPEARANCE_RU: Record<Snapshot["appearance"], string> = {
+  base: "дорожный комплект",
+  armor: "тяжёлый доспех",
+  mage: "пепельная роба",
+  thief: "теневой охотник",
+  pirate: "корсар Соляного киля",
+};
+const TIER_RU = { 1: "I · основа", 2: "II · хозяйство", 3: "III · оплот" } as const;
 const SLOT_RU: Record<EquipmentSlot, string> = { wep: "Оружие", arm: "Броня", cloak: "Плащ", helm: "Шлем" };
 const HP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].hp));
 const MP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].mp));
@@ -155,65 +166,34 @@ function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlo
   );
 }
 
-function HeroPaperDoll({ heroId, equipment }: { heroId: keyof typeof HEROES; equipment: Record<EquipmentSlot, ItemId | null> }) {
+function HeroPaperDoll({
+  heroId,
+  equipment,
+  appearance,
+}: {
+  heroId: keyof typeof HEROES;
+  equipment: Record<EquipmentSlot, ItemId | null>;
+  appearance: Snapshot["appearance"];
+}) {
   const hero = HEROES[heroId];
-  const cloak = equipment.cloak;
-  const armor = equipment.arm;
-  const helm = equipment.helm;
-  const weapon = equipment.wep;
-  const visibleLayers = [cloak, armor, helm, weapon].filter(Boolean).length;
+  const equipped = Object.values(equipment).filter(Boolean).length;
+  const row = appearance === "armor" ? 0 : appearance === "mage" ? 1 : appearance === "thief" ? 2 : 3;
+  const generated = appearance !== "base";
   return (
     <div className="paper-doll">
-      <div className="paper-doll-stage" aria-label={`Внешность героя: ${visibleLayers} предмета экипировки`}>
+      <div className="paper-doll-stage" aria-label={`Полный облик героя: ${APPEARANCE_RU[appearance]}`}>
         <span className="paper-doll-aura" aria-hidden />
-        {cloak && cloak !== "sash" ? (
-          <svg className={`paper-doll-layer is-cloak cloak-${cloak}`} viewBox="0 0 128 128" aria-hidden>
-            <path d="M42 46 Q64 38 86 46 L96 109 Q80 120 64 122 Q48 120 32 109 Z" />
-            {cloak === "stormcloak" ? <path className="gear-detail" d="M37 84 Q64 103 91 84 M39 96 Q64 114 89 96" /> : null}
-          </svg>
-        ) : null}
         <span
-          className="paper-doll-base"
-          style={{ backgroundImage: `url(/sprites/${hero.sheet}.png)` }}
+          className={`paper-doll-base ${generated ? "is-appearance" : "is-base"}`}
+          style={{
+            backgroundImage: `url(/sprites/${hero.sheet}${generated ? "-appearances" : ""}.png)`,
+            backgroundPosition: generated ? `0 ${row * (100 / 3)}%` : "0 0",
+          }}
           aria-hidden
         />
-        <svg className={`paper-doll-layer is-gear armor-${armor ?? "none"} helm-${helm ?? "none"} weapon-${weapon ?? "none"}`} viewBox="0 0 128 128" aria-hidden>
-          {armor === "chain" ? (
-            <>
-              <path className="gear-fill armor-fill" d="M43 48 Q64 39 85 48 L87 78 Q64 89 41 78 Z" />
-              <path className="gear-detail" d="M46 54 L82 75 M46 64 L75 81 M82 54 L46 75 M82 64 L53 81" />
-            </>
-          ) : null}
-          {armor === "shellmail" ? (
-            <>
-              <path className="gear-fill armor-fill" d="M39 49 Q64 38 89 49 L88 80 Q64 92 40 80 Z" />
-              <path className="gear-detail" d="M44 56 Q50 48 56 56 Q62 48 68 56 Q74 48 80 56 M44 69 Q50 61 56 69 Q62 61 68 69 Q74 61 80 69" />
-            </>
-          ) : null}
-          {cloak === "sash" ? <path className="gear-fill sash-fill" d="M43 48 L83 80 L77 87 L38 55 Z" /> : null}
-          {helm ? (
-            <>
-              <path className="gear-fill helm-fill" d="M44 34 Q64 13 84 34 L82 47 Q64 54 46 47 Z" />
-              <path className="gear-detail" d="M48 37 Q64 29 80 37" />
-              {helm === "firecrown" ? <path className="crown-flame" d="M46 35 L49 18 L58 28 L64 12 L70 28 L79 18 L82 35 Z" /> : null}
-            </>
-          ) : null}
-          {weapon === "harpoon" ? (
-            <>
-              <path className="weapon-line" d="M86 85 L111 30" />
-              <path className="weapon-fill" d="M107 35 L117 21 L114 39 L108 34 L101 31 Z" />
-            </>
-          ) : weapon ? (
-            <>
-              <path className="weapon-line" d="M88 86 L108 42" />
-              <path className="weapon-fill" d="M104 46 L114 29 L111 49 Z" />
-              <path className="weapon-line" d="M99 52 L113 58" />
-            </>
-          ) : null}
-        </svg>
       </div>
       <div className="paper-doll-caption">
-        <span><Sparkles /> {visibleLayers}/4 слоя видны в мире</span>
+        <span><Sparkles /> {APPEARANCE_RU[appearance]} · {equipped}/4 слота</span>
         <p>{hero.name} · {hero.title}</p>
       </div>
     </div>
@@ -759,27 +739,51 @@ export function Oathbound() {
 
         {snap.mode === "site" ? (
           <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto overflow-auto hud-ink">
-            <div className="overlay-card w-full max-w-lg">
+            <div className="overlay-card w-full max-w-4xl site-panel">
               {(() => {
                 const s = snap.sites.find((x) => x.id === snap.nearSite) ?? snap.sites[0];
                 if (!s) return <p>Нет участка.</p>;
                 return (
                   <>
-                    <p className="font-mono text-xs tracking-widest text-muted">УЧАСТОК</p>
-                    <h2 className="mt-1 font-display text-xl font-semibold">{s.name}</h2>
-                    <p className="mt-2 text-sm text-muted">{s.blurb}</p>
+                    <header className="site-header">
+                      <div>
+                        <p className="font-mono text-xs tracking-widest text-muted">УЧАСТОК · {s.stage}</p>
+                        <h2 className="mt-1 font-display text-2xl font-semibold">{s.name}</h2>
+                      </div>
+                      <div className="site-purse" aria-label="Запасы для строительства">
+                        <span><Coins /> {snap.gold} зол.</span>
+                        <span><Zap /> {Math.floor(snap.food)} сил</span>
+                      </div>
+                    </header>
+                    <p className="site-lore">{s.blurb}</p>
                     {s.built ? (
-                      <p className="mt-4 text-sm text-ok">Стоит: {s.built}</p>
+                      <div className="site-built"><Check /> Здесь уже стоит: <b>{s.built}</b></div>
                     ) : (
-                      <ul className="mt-4">
+                      <ul className="site-options">
                         {s.options.map((o) => (
-                          <li key={o.id} className="choice flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium">{o.name}</p>
-                              <p className="text-xs text-muted mt-1">{o.desc}</p>
-                              <p className="text-xs text-subtle mt-1">{o.bonus}</p>
+                          <li key={o.id} className={`site-choice ${o.ok ? "is-ready" : ""}`}>
+                            <div className="site-choice-copy">
+                              <span className="site-tier">{TIER_RU[o.tier]}</span>
+                              <p className="font-display text-lg font-semibold">{o.name}</p>
+                              <p className="site-choice-lore">{o.desc}</p>
+                              <p className="site-bonus"><Sparkles /> {o.bonus}</p>
+                              <div className="site-costs">
+                                <span className={`ingredient-chip ${snap.gold >= o.cost ? "is-enough" : "is-missing"}`}>
+                                  <Coins /> золото <b>{snap.gold}/{o.cost}</b>
+                                </span>
+                                <span className={`ingredient-chip ${snap.food >= o.energy ? "is-enough" : "is-missing"}`}>
+                                  <Zap /> силы <b>{Math.floor(snap.food)}/{o.energy}</b>
+                                </span>
+                                {o.need.map((part) => (
+                                  <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
+                                    <ItemGlyph id={part.id} size="sm" /> {part.name} <b>{part.have}/{part.need}</b>
+                                  </span>
+                                ))}
+                              </div>
                             </div>
-                            <Button size="sm" variant="ghost" disabled={!o.ok} onClick={() => g.current?.raiseSite(s.id, o.id)}>{o.cost} зол.</Button>
+                            <Button size="sm" variant="ghost" disabled={!o.ok} onClick={() => g.current?.raiseSite(s.id, o.id)}>
+                              {o.ok ? <><Hammer /> Построить</> : <><LockKeyhole /> Не хватает</>}
+                            </Button>
                           </li>
                         ))}
                       </ul>
@@ -799,22 +803,34 @@ export function Oathbound() {
                 <div>
                   <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : "ОСТРОВНАЯ МАСТЕРСКАЯ"}</p>
                   <h2 className="mt-1 font-display text-2xl font-semibold">{snap.inKeep ? "Стройка и ремесло" : "Создать предмет"}</h2>
-                  <p className="mt-1 text-sm text-muted">Готовые рецепты стоят первыми. Нажми один раз — предмет сразу появится в сумке.</p>
+                  <p className="mt-1 text-sm text-muted">{snap.inKeep ? "Подними очаг, затем хозяйство и только потом оплот. Золото платит мастерам, ресурсы становятся стенами, силы тратятся на работу." : "Готовые рецепты стоят первыми. Нажми один раз — предмет сразу появится в сумке."}</p>
                 </div>
                 <button type="button" className="icon-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
               </header>
               {snap.inKeep ? (
                 <ul className="mt-5 grid gap-2 md:grid-cols-3">
                   {snap.buildings.map((b) => (
-                    <li key={b.id} className="build-card flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">{b.name}</p>
-                        <p className="text-xs text-muted mt-1">{b.desc}</p>
+                    <li key={b.id} className={`build-card ${b.ok ? "is-ready" : ""}`}>
+                      <span className="site-tier">{TIER_RU[b.tier]}</span>
+                      <p className="font-display text-lg font-semibold">{b.name}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted">{b.desc}</p>
+                      <p className="site-bonus"><Sparkles /> {b.bonus}</p>
+                      {b.requires.length ? <p className="build-lock"><LockKeyhole /> Сначала: {b.requires.join(", ")}</p> : null}
+                      <div className="site-costs">
+                        <span className={`ingredient-chip ${snap.gold >= b.cost ? "is-enough" : "is-missing"}`}><Coins /> <b>{snap.gold}/{b.cost}</b></span>
+                        <span className={`ingredient-chip ${snap.food >= b.energy ? "is-enough" : "is-missing"}`}><Zap /> <b>{Math.floor(snap.food)}/{b.energy}</b></span>
+                        {b.need.map((part) => (
+                          <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
+                            <ItemGlyph id={part.id} size="sm" /> {part.name} <b>{part.have}/{part.need}</b>
+                          </span>
+                        ))}
                       </div>
                       {b.built ? (
-                        <span className="font-mono text-xs text-ok">стоит</span>
+                        <span className="build-done"><Check /> построено</span>
                       ) : (
-                        <Button size="sm" variant="ghost" disabled={!b.ok} onClick={() => g.current?.build(b.id)}>{b.cost} зол.</Button>
+                        <Button className="mt-auto" size="sm" variant="ghost" disabled={!b.ok} onClick={() => g.current?.build(b.id)}>
+                          {b.ok ? <><Hammer /> Построить</> : <><LockKeyhole /> Недоступно</>}
+                        </Button>
                       )}
                     </li>
                   ))}
@@ -910,7 +926,7 @@ export function Oathbound() {
               <section className="mt-5">
                 <p className="font-mono text-[10px] tracking-[0.2em] text-muted">НАДЕТО СЕЙЧАС</p>
                 <div className="inventory-loadout mt-2">
-                  {snap.hero ? <HeroPaperDoll heroId={snap.hero} equipment={snap.equipment} /> : null}
+                  {snap.hero ? <HeroPaperDoll heroId={snap.hero} equipment={snap.equipment} appearance={snap.appearance} /> : null}
                   <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                     {equippedSlots.map(({ slot, item }) => (
                       <div key={slot} className={`equipment-slot ${item ? "is-filled" : ""}`}>

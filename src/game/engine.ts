@@ -27,6 +27,9 @@ import {
 } from "./world";
 
 export type Mode = "menu" | "play" | "pause" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
+export type Appearance = "base" | "armor" | "mage" | "thief" | "pirate";
+
+export type CostPart = { id: ItemId; name: string; have: number; need: number; ok: boolean };
 
 export type Snapshot = {
   mode: Mode;
@@ -51,7 +54,19 @@ export type Snapshot = {
   place: string;
   xpNeed: number;
   meleeCd: number;
-  buildings: { id: BuildId; name: string; cost: number; desc: string; bonus: string; built: boolean; ok: boolean }[];
+  buildings: {
+    id: BuildId;
+    name: string;
+    cost: number;
+    tier: 1 | 2 | 3;
+    energy: number;
+    need: CostPart[];
+    requires: string[];
+    desc: string;
+    bonus: string;
+    built: boolean;
+    ok: boolean;
+  }[];
   waypoints: { id: WpId; name: string; unlocked: boolean }[];
   portalOpen: boolean;
   inKeep: boolean;
@@ -77,6 +92,7 @@ export type Snapshot = {
   haven: { name: string; effect: string } | null;
   raid: { active: boolean; wave: number; havenHp: number; maxHavenHp: number; nextWave: number; status: string } | null;
   guise: Guise;
+  appearance: Appearance;
   goldFlash: number;
   activeSlot: number;
   canCraft: boolean;
@@ -95,11 +111,22 @@ export type Snapshot = {
     id: SiteId;
     map: MapId;
     name: string;
+    stage: string;
     blurb: string;
     c: number;
     r: number;
     built: string;
-    options: { id: string; name: string; cost: number; desc: string; bonus: string; ok: boolean }[];
+    options: {
+      id: string;
+      name: string;
+      cost: number;
+      tier: 1 | 2 | 3;
+      energy: number;
+      need: CostPart[];
+      desc: string;
+      bonus: string;
+      ok: boolean;
+    }[];
   }[];
   nearSite: SiteId | null;
   landmarks: { id: string; name: string; c: number; r: number }[];
@@ -292,14 +319,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let maxHp = 34;
   let mp = 8;
   let maxMp = 8;
-  let food = 28;
-  let gold = 80;
+  let food = 18;
+  let gold = 16;
   let xp = 0;
   let level = 1;
   let str = 12;
   let baseSpd = 118;
   let baseArmor = 2;
-  const items: ItemId[] = ["sword", "leather"];
+  const items: ItemId[] = ["sword", "leather", "wood", "herb"];
   const worn: Record<Slot, ItemId | null> = { wep: "sword", arm: "leather", cloak: null, helm: null };
   let lyra = false;
   let lyraHp = 18;
@@ -438,7 +465,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -458,13 +485,33 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function itemCount(id: ItemId) {
     return items.filter((candidate) => candidate === id).length;
   }
-  function recipeNeeds(r: (typeof CRAFT)[number]) {
+  function itemNeeds(ids: ItemId[] = []) {
     const counts = new Map<ItemId, number>();
-    for (const id of r.need) counts.set(id, (counts.get(id) ?? 0) + 1);
+    for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
     return [...counts].map(([id, need]) => {
       const have = itemCount(id);
       return { id, name: ITEM[id].name, have, need, ok: have >= need };
     });
+  }
+  function recipeNeeds(r: (typeof CRAFT)[number]) {
+    return itemNeeds(r.need);
+  }
+  function hasNeeds(ids: ItemId[] = []) {
+    return itemNeeds(ids).every((part) => part.ok);
+  }
+  function spendNeeds(ids: ItemId[] = []) {
+    for (const id of ids) {
+      const index = items.indexOf(id);
+      if (index >= 0) items.splice(index, 1);
+    }
+  }
+  function canAfford(cost: number, energy: number, need: ItemId[] = []) {
+    return gold >= cost && food >= energy && hasNeeds(need);
+  }
+  function spendCost(cost: number, energy: number, need: ItemId[] = []) {
+    gold -= cost;
+    food = Math.max(0, food - energy);
+    spendNeeds(need);
   }
   function give(id: ItemId) {
     if (id === "food") food += 10;
@@ -486,6 +533,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (worn.cloak === "robe") return "mage";
     if (worn.cloak === "shroud") return "thief";
     return "oath";
+  }
+
+  function appearance(): Appearance {
+    if (worn.cloak === "sash" || worn.cloak === "stormcloak" || worn.wep === "harpoon") return "pirate";
+    if (worn.cloak === "robe" || worn.helm === "firecrown") return "mage";
+    if (worn.cloak === "shroud") return "thief";
+    if (worn.arm === "chain" || worn.arm === "shellmail" || worn.helm) return "armor";
+    return "base";
   }
 
   function equip(id: ItemId) {
@@ -759,10 +814,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         id: b.id,
         name: b.name,
         cost: b.cost,
+        tier: b.tier,
+        energy: b.energy,
+        need: itemNeeds(b.need),
+        requires: (b.requires ?? []).filter((id) => !built.has(id)).map((id) => BUILDINGS.find((candidate) => candidate.id === id)?.name ?? id),
         desc: b.desc,
         bonus: b.bonus,
         built: built.has(b.id),
-        ok: gold >= b.cost,
+        ok: !built.has(b.id) && (b.requires ?? []).every((id) => built.has(id)) && canAfford(b.cost, b.energy, b.need),
       })),
       waypoints: WAYPOINTS.map((w) => ({ id: w.id, name: w.name, unlocked: stones.has(w.id) })),
       portalOpen: !!fieldPortal,
@@ -812,6 +871,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             }
           : null,
       guise: guise(),
+      appearance: appearance(),
       goldFlash,
       activeSlot,
       canCraft: canCraftHere(),
@@ -833,6 +893,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           id: s.id,
           map: s.map,
           name: s.name,
+          stage: s.stage,
           blurb: s.blurb,
           c: s.c,
           r: s.r,
@@ -841,9 +902,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             id: o.id,
             name: o.name,
             cost: o.cost,
+            tier: o.tier,
+            energy: o.energy,
+            need: itemNeeds(o.need),
             desc: o.desc,
             bonus: o.bonus,
-            ok: !pick && gold >= o.cost,
+            ok: !pick && canAfford(o.cost, o.energy, o.need),
           })),
         };
       }),
@@ -1109,15 +1173,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     hp = h.hp;
     maxMp = h.mp;
     mp = h.mp;
-    food = 28;
-    gold = 80;
+    food = 18;
+    gold = 16;
     xp = 0;
     level = 1;
     str = h.str;
     baseSpd = h.spd;
     baseArmor = h.armor;
     items.length = 0;
-    items.push(id === "vessa" ? "leather" : "sword", "leather");
+    if (id !== "vessa") items.push("sword");
+    items.push("leather", "wood", "herb");
     worn.wep = id === "vessa" ? null : "sword";
     worn.arm = "leather";
     worn.cloak = null;
@@ -2069,12 +2134,19 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
     const b = BUILDINGS.find((x) => x.id === id);
     if (!b || built.has(id)) return;
-    if (gold < b.cost) {
-      say("Мало золота.");
+    const missingBuilding = (b.requires ?? []).find((required) => !built.has(required));
+    if (missingBuilding) {
+      say(`Сначала построй: ${BUILDINGS.find((candidate) => candidate.id === missingBuilding)?.name ?? missingBuilding}.`);
       emit(true);
       return;
     }
-    gold -= b.cost;
+    if (!canAfford(b.cost, b.energy, b.need)) {
+      const missing = itemNeeds(b.need).filter((part) => !part.ok).map((part) => part.name.toLowerCase());
+      say(gold < b.cost ? "Не хватает золота." : food < b.energy ? "Не хватает сил на стройку. Поешь или отдохни." : `Не хватает: ${missing.join(", ")}.`);
+      emit(true);
+      return;
+    }
+    spendCost(b.cost, b.energy, b.need);
     built.add(id);
     if (id === "barracks") {
       maxHp += 8;
@@ -2085,7 +2157,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       mp += 6;
     }
     recalcKeep();
-    say(`${b.name} стоит. ${b.bonus}.`);
+    say(`${b.name} стоит. ${b.bonus}. Потрачено ${b.cost} золота и ${b.energy} сил.`);
     audio.ok();
     burst(b.c * TILE + 16, b.r * TILE + 16, id === "hearth" ? "#e07a4a" : "#d8c070", id === "hearth" ? 28 : 14);
     emit(true);
@@ -2105,12 +2177,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
-    if (gold < opt.cost) {
-      say("Мало золота.");
+    if (!canAfford(opt.cost, opt.energy, opt.need)) {
+      const missing = itemNeeds(opt.need).filter((part) => !part.ok).map((part) => part.name.toLowerCase());
+      say(gold < opt.cost ? "Не хватает золота." : food < opt.energy ? "Не хватает сил на стройку. Поешь или отдохни." : `Не хватает: ${missing.join(", ")}.`);
       emit(true);
       return;
     }
-    gold -= opt.cost;
+    spendCost(opt.cost, opt.energy, opt.need);
     raised.set(siteId, optId);
     if (opt.armor) siteArmor += opt.armor;
     if (opt.hp) {
@@ -2127,7 +2200,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (opt.cloth) for (let i = 0; i < opt.cloth; i++) give("cloth");
     if (opt.potion) give("potion");
     if (opt.waypoint) stones.add(opt.waypoint);
-    say(`${opt.name} стоит. ${opt.bonus}.`);
+    say(`${opt.name} стоит. ${opt.bonus}. Потрачено ${opt.cost} золота и ${opt.energy} сил.`);
     audio.ok();
     burst(s.c * TILE + 16, s.r * TILE + 16, "#d8c070", 18);
     mode = opt.craft ? "build" : "play";
@@ -2792,6 +2865,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     blit(img, dx, dy, s, s, col * (img.width / cols), row * (img.height / rows), img.width / cols, img.height / rows);
   }
 
+  function drawHeroSprite(face: number, dx: number, dy: number, size: number) {
+    const current = appearance();
+    if (current === "base") {
+      sheet(imgs[HEROES[heroId].sheet], face, dx, dy, size);
+      return;
+    }
+    const row: Record<Exclude<Appearance, "base">, number> = { armor: 0, mage: 1, thief: 2, pirate: 3 };
+    sheetGrid(imgs[`${HEROES[heroId].sheet}-appearances`], row[current] * 4 + face, 4, 4, dx, dy, size);
+  }
+
   function drawPortal(x: number, y: number) {
     const p = wrld(x, y);
     const pulse = 0.45 + Math.sin(time * 7) * 0.2;
@@ -3098,7 +3181,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (fx.kind === "afterimage") {
         ctx.globalAlpha = left * 0.28;
         ctx.filter = `sepia(0.4) saturate(0.7) drop-shadow(0 0 6px ${fx.color})`;
-        sheet(imgs[HEROES[heroId].sheet], fx.face, -22, -34, 46);
+        drawHeroSprite(fx.face, -22, -34, 46);
       } else if (fx.kind === "wave") {
         const radius = fx.r * (0.28 + progress * 0.82);
         ctx.globalAlpha = left * 0.72;
@@ -3542,199 +3625,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.restore();
     }
     if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.45;
-    if (worn.arm === "shellmail") {
-      ctx.save();
-      ctx.filter = "brightness(1.08) saturate(0.76) hue-rotate(24deg) drop-shadow(0 6px 4px rgba(0,0,0,.55))";
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
-      ctx.restore();
-      ctx.fillStyle = "#d8d0a8";
-      ctx.beginPath();
-      ctx.ellipse(cx - 10, cy - 8, 7, 5, -0.35, 0, Math.PI * 2);
-      ctx.ellipse(cx + 10, cy - 8, 7, 5, 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#4d7773";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx - 9, cy - 1);
-      ctx.lineTo(cx + 9, cy + 6);
-      ctx.moveTo(cx + 9, cy - 1);
-      ctx.lineTo(cx - 9, cy + 6);
-      ctx.stroke();
-    } else if (worn.arm === "chain") {
-      ctx.save();
-      ctx.filter = "brightness(1.18) saturate(0.7) drop-shadow(0 6px 4px rgba(0,0,0,.55))";
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
-      ctx.restore();
-      ctx.fillStyle = "#c8d0c4";
-      ctx.fillRect(cx - 12, cy - 10, 8, 6);
-      ctx.fillRect(cx + 4, cy - 10, 8, 6);
-    } else {
-      ctx.save();
-      ctx.filter = "drop-shadow(0 6px 4px rgba(0,0,0,.55))";
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.filter = "drop-shadow(0 6px 4px rgba(0,0,0,.55))";
+    drawHeroSprite(dir, ps.x, ps.y, heroSize);
+    ctx.restore();
     ctx.globalAlpha = 1;
-    if (worn.cloak === "sash") {
-      ctx.fillStyle = "#c17a6a";
-      ctx.fillRect(cx - 10, cy + 6, 20, 5);
-    } else if (worn.cloak === "robe") {
-      ctx.fillStyle = "#3a3a48";
-      ctx.fillRect(cx - 11, cy + 2, 22, 10);
-    } else if (worn.cloak === "shroud") {
-      ctx.fillStyle = "#1a1a18";
-      ctx.globalAlpha = 0.7;
-      ctx.fillRect(cx - 12, cy - 4, 24, 16);
-      ctx.globalAlpha = 1;
-    } else if (worn.cloak === "stormcloak") {
-      ctx.fillStyle = "#183f3c";
-      ctx.globalAlpha = 0.92;
-      ctx.beginPath();
-      ctx.moveTo(cx - 13, cy - 8);
-      ctx.lineTo(cx + 13, cy - 8);
-      ctx.lineTo(cx + 16, cy + 16);
-      ctx.lineTo(cx, cy + 11);
-      ctx.lineTo(cx - 16, cy + 16);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "#79a69b";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy - 9, 10, Math.PI, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    if (worn.helm === "tidehelm") {
-      const glow = 0.7 + Math.sin(time * 5) * 0.2;
-      ctx.fillStyle = "#263f42";
-      ctx.beginPath();
-      ctx.ellipse(cx, cy - 13, 12, 8, 0, Math.PI, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#91c8bf";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(cx - 10, cy - 14);
-      ctx.lineTo(cx - 17, cy - 21);
-      ctx.lineTo(cx - 9, cy - 18);
-      ctx.moveTo(cx + 10, cy - 14);
-      ctx.lineTo(cx + 17, cy - 21);
-      ctx.lineTo(cx + 9, cy - 18);
-      ctx.stroke();
-      ctx.globalAlpha = glow;
-      ctx.fillStyle = "#d8f0e8";
-      ctx.beginPath();
-      ctx.arc(cx, cy - 19, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else if (worn.helm === "havenhood") {
-      ctx.fillStyle = "#29463b";
-      ctx.beginPath();
-      ctx.arc(cx, cy - 12, 12, Math.PI, Math.PI * 2);
-      ctx.lineTo(cx + 10, cy - 2);
-      ctx.lineTo(cx - 10, cy - 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "#9c8561";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy - 11, 8, Math.PI, Math.PI * 2);
-      ctx.stroke();
-    } else if (worn.helm === "saltvisor") {
-      ctx.fillStyle = "#d7d1b9";
-      ctx.beginPath();
-      ctx.ellipse(cx, cy - 14, 12, 8, 0, Math.PI, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#40585b";
-      ctx.fillRect(cx - 12, cy - 13, 24, 5);
-      ctx.fillStyle = "#9ec8c2";
-      ctx.fillRect(cx - 7, cy - 12, 3, 2);
-      ctx.fillRect(cx + 4, cy - 12, 3, 2);
-    } else if (worn.helm === "firecrown") {
-      const glow = 0.65 + Math.sin(time * 8) * 0.25;
-      ctx.globalAlpha = 0.18 * glow;
-      ctx.fillStyle = "#e07a4a";
-      ctx.beginPath();
-      ctx.arc(cx, cy - 16, 18, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#a85d38";
-      ctx.beginPath();
-      ctx.moveTo(cx - 12, cy - 10);
-      ctx.lineTo(cx - 10, cy - 22);
-      ctx.lineTo(cx - 4, cy - 15);
-      ctx.lineTo(cx, cy - 25);
-      ctx.lineTo(cx + 4, cy - 15);
-      ctx.lineTo(cx + 10, cy - 22);
-      ctx.lineTo(cx + 12, cy - 10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = glow;
-      ctx.fillStyle = "#f0c36f";
-      ctx.beginPath();
-      ctx.arc(cx, cy - 18, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    const swing = lunge > 0 ? Math.sin((1 - lunge / 0.12) * Math.PI) * 0.72 : 0;
-    const angW = aim() + swing;
-    const fx = Math.cos(angW);
-    const fy = Math.sin(angW);
-    const steel = worn.wep === "steel";
-    if (worn.wep === "harpoon") {
-      const len = 29;
-      ctx.strokeStyle = "#725437";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx - fx * 9, cy - fy * 9 + 5);
-      ctx.lineTo(cx + fx * len, cy + fy * len - 4);
-      ctx.stroke();
-      const tx = cx + fx * len;
-      const ty = cy + fy * len - 4;
-      ctx.save();
-      ctx.translate(tx, ty);
-      ctx.rotate(angW);
-      ctx.fillStyle = "#b9d8ca";
-      ctx.beginPath();
-      ctx.moveTo(10, 0);
-      ctx.lineTo(-3, -5);
-      ctx.lineTo(0, 0);
-      ctx.lineTo(-3, 5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    } else if (heroId === "vessa") {
-      ctx.strokeStyle = "#6a5a40";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(cx - fx * 4, cy + 8);
-      ctx.lineTo(cx + fx * 8, cy - 16);
-      ctx.stroke();
-      ctx.fillStyle = "#e07a4a";
-      ctx.globalAlpha = 0.7 + Math.sin(time * 8) * 0.3;
-      ctx.beginPath();
-      ctx.arc(cx + fx * 8, cy - 16, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else if (heroId === "kael") {
-      ctx.strokeStyle = "#5a4a32";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx + fx * 8, cy, 8, fy >= 0 ? 0.4 : 3.4, fy >= 0 ? 2.8 : 6);
-      ctx.stroke();
-    } else {
-      const len = steel ? 20 : 14;
-      ctx.strokeStyle = steel ? "#e8e4d8" : "#8a7060";
-      ctx.lineWidth = steel ? 3 : 2;
-      ctx.beginPath();
-      ctx.moveTo(cx + fx * 6, cy + fy * 2);
-      ctx.lineTo(cx + fx * len, cy + fy * len - 4);
-      ctx.stroke();
-      if (steel) {
-        ctx.fillStyle = "#e8e4d8";
-        ctx.fillRect(cx + fx * len - 2, cy + fy * len - 6, 4, 4);
-      }
-    }
     if (has("torch")) {
+      const angW = aim();
+      const fx = Math.cos(angW);
       const tx = cx - fx * 10;
       const ty = cy - 4;
       ctx.fillStyle = "#6a4a28";
