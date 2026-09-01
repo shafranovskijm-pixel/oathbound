@@ -174,7 +174,7 @@ function SiteFoundationArt({ siteId, name }: { siteId: string; name: string }) {
 }
 
 function BuildingArt({ sprite, frame, name, large = false }: { sprite: string; frame: number; name: string; large?: boolean }) {
-  const sheet = sprite === "keep" || sprite.startsWith("site-buildings-");
+  const sheet = sprite === "keep" || sprite === "shoal-settlement-v1" || sprite.startsWith("site-buildings-");
   return (
     <span className={`building-art ${large ? "is-large" : ""}`} role="img" aria-label={name}>
       <span
@@ -934,12 +934,12 @@ export function Oathbound() {
 
         {snap.mode === "build" ? (
           <div className="absolute inset-0 flex items-center justify-center p-3 md:p-5 pointer-events-auto overflow-auto hud-ink">
-            <div className={`overlay-card w-full ${snap.canCraft ? "max-w-5xl" : "max-w-2xl"}`}>
+            <div className={`overlay-card w-full ${snap.canCraft || snap.buildings.length ? "max-w-6xl" : "max-w-2xl"}`}>
               <header className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : "ОСТРОВНАЯ МАСТЕРСКАЯ"}</p>
-                  <h2 className="mt-1 font-display text-2xl font-semibold">{snap.inKeep ? "Стройка и ремесло" : "Создать предмет"}</h2>
-                  <p className="mt-1 text-sm text-muted">{snap.inKeep ? "Подними очаг, затем хозяйство и только потом оплот. Золото платит мастерам, ресурсы становятся стенами, силы тратятся на работу." : "Готовые рецепты стоят первыми. Нажми один раз — предмет сразу появится в сумке."}</p>
+                  <p className="font-mono text-xs tracking-widest text-muted">{snap.inKeep ? "ДВОР КЛЯТВЫ" : snap.you.map === "shoal" ? "ЛАГЕРЬ ТРЁХ ДОСОК" : "ОСТРОВНАЯ МАСТЕРСКАЯ"}</p>
+                  <h2 className="mt-1 font-display text-2xl font-semibold">{snap.inKeep ? "Стройка и ремесло" : snap.you.map === "shoal" ? "Собрать дом из обломков" : "Создать предмет"}</h2>
+                  <p className="mt-1 text-sm text-muted">{snap.inKeep ? "Подними очаг, затем хозяйство и только потом оплот. Золото платит мастерам, ресурсы становятся стенами, силы тратятся на работу." : snap.you.map === "shoal" ? "Начни с костра. Новые постройки соединяются тропами, дают отдых, крафт и облегчают сборку первой лодки. У каждой есть второй уровень." : "Готовые рецепты стоят первыми. Нажми один раз — предмет сразу появится в сумке."}</p>
                 </div>
                 <button type="button" className="icon-close" onClick={() => g.current?.closePanel()} aria-label="Закрыть"><X /></button>
               </header>
@@ -965,32 +965,30 @@ export function Oathbound() {
                   </div>
                 </section>
               ) : null}
-              {snap.inKeep ? (
+              {snap.buildings.length ? (
                 <ul className="mt-5 grid gap-2 md:grid-cols-3">
                   {snap.buildings.map((b) => (
-                    <li key={b.id} className={`build-card ${b.ok ? "is-ready" : ""}`}>
+                    <li key={b.id} className={`build-card ${b.ok ? "is-ready" : ""} ${b.action === "complete" ? "is-complete" : ""}`}>
                       <div className="build-card-visual">
-                        <BuildingArt sprite="keep" frame={b.sprite} name={b.name} />
-                        <span className="site-tier">{TIER_RU[b.tier]}</span>
+                        <BuildingArt sprite={b.sheet} frame={b.sprite} name={b.name} />
+                        <span className="site-tier">{b.maxLevel > 1 ? `ур. ${b.level}/${b.maxLevel}` : TIER_RU[b.tier]}</span>
                       </div>
                       <p className="font-display text-lg font-semibold">{b.name}</p>
                       <p className="mt-1 text-xs leading-relaxed text-muted">{b.desc}</p>
                       <p className="site-bonus"><Sparkles /> {b.bonus}</p>
                       {b.requires.length ? <p className="build-lock"><LockKeyhole /> Сначала: {b.requires.join(", ")}</p> : null}
-                      <div className="site-costs">
-                        <span className={`ingredient-chip ${snap.gold >= b.cost ? "is-enough" : "is-missing"}`}><Coins /> <b>{snap.gold}/{b.cost}</b></span>
-                        <span className={`ingredient-chip ${snap.food >= b.energy ? "is-enough" : "is-missing"}`}><Zap /> <b>{Math.floor(snap.food)}/{b.energy}</b></span>
-                        {b.need.map((part) => (
-                          <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
-                            <ItemGlyph id={part.id} size="sm" /> {part.name} <b>{part.have}/{part.need}</b>
-                          </span>
-                        ))}
-                      </div>
-                      {b.built ? (
-                        <span className="build-done"><Check /> построено</span>
+                      {b.action !== "complete" ? <div className="site-costs">
+                        {b.cost > 0 ? <span className={`ingredient-chip ${snap.gold >= b.cost ? "is-enough" : "is-missing"}`}><Coins /> <b>{snap.gold}/{b.cost}</b></span> : null}
+                        {b.energy > 0 ? <span className={`ingredient-chip ${snap.food >= b.energy ? "is-enough" : "is-missing"}`}><Zap /> <b>{Math.floor(snap.food)}/{b.energy}</b></span> : null}
+                        {b.need.map((part) => <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
+                          <ItemGlyph id={part.id} size="sm" /> {part.name} <b>{part.have}/{part.need}</b>
+                        </span>)}
+                      </div> : null}
+                      {b.action === "complete" ? (
+                        <span className="build-done"><Check /> полностью улучшено</span>
                       ) : (
                         <Button className="mt-auto" size="sm" variant="ghost" disabled={!b.ok} onClick={() => g.current?.build(b.id)}>
-                          {b.ok ? <><Hammer /> Построить</> : <><LockKeyhole /> Недоступно</>}
+                          {b.ok ? <><Hammer /> {b.action === "upgrade" ? "Улучшить" : "Построить"}</> : <><LockKeyhole /> {b.action === "upgrade" ? "Не хватает" : "Недоступно"}</>}
                         </Button>
                       )}
                     </li>

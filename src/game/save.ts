@@ -89,6 +89,7 @@ export type GameSave = {
   owned: TalentId[];
   pending: TalentId[];
   built: BuildId[];
+  buildingLevels?: [BuildId, number][];
   raised: [SiteId, string][];
   stones: WpId[];
   fieldPortal: { map: MapId; x: number; y: number } | null;
@@ -124,6 +125,13 @@ function stringPairs(value: unknown): value is [string, string][] {
   return (
     Array.isArray(value) &&
     value.every((item) => Array.isArray(item) && item.length === 2 && item.every((part) => typeof part === "string"))
+  );
+}
+
+function stringNumberPairs(value: unknown): value is [string, number][] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => Array.isArray(item) && item.length === 2 && typeof item[0] === "string" && finite(item[1]))
   );
 }
 
@@ -213,6 +221,7 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     }
     if (!strings(value.items) || !strings(value.flags) || !strings(value.opened)) return null;
     if (!strings(value.owned) || !strings(value.pending) || !strings(value.built) || !strings(value.stones)) return null;
+    if (value.buildingLevels !== undefined && !stringNumberPairs(value.buildingLevels)) return null;
     if (!strings(value.log) || !stringPairs(value.raised)) return null;
     if (!record(value.worn) || !("wep" in value.worn) || !("arm" in value.worn) || !("cloak" in value.worn)) return null;
     if (![value.worn.wep, value.worn.arm, value.worn.cloak].every((item) => item === null || typeof item === "string")) return null;

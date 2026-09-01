@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { ITEM, MOB, NPCS } from "../src/game/content.ts";
+import { BUILDINGS } from "../src/game/keep.ts";
 import { blocked, MAPS, SPAWN } from "../src/game/world.ts";
 
 const source = JSON.parse(await readFile(new URL("../src/game/oathbound.json", import.meta.url), "utf8"));
@@ -54,6 +55,7 @@ test("starter shoal teaches gathering, gold, gear and boat construction", () => 
   assert.ok(amount("wood") >= 4);
   assert.ok(amount("cloth") >= 2);
   assert.ok(amount("ore") >= 1);
+  assert.ok(amount("driftwood") >= 10, "the starter island needs enough reclaimed wood for a useful first camp");
   assert.equal(ITEM.rags.slot, "arm");
   assert.equal(ITEM.shiv.slot, "wep");
   assert.ok(ITEM.mapshard.desc.includes("семичастной"));
@@ -63,6 +65,25 @@ test("starter shoal teaches gathering, gold, gear and boat construction", () => 
   assert.ok(noll.words.MAP.includes("Три золотых"));
   assert.ok(noll.words.BOAT.includes("Четыре"));
   assert.ok(MOB.crab.hp >= 28, "the tutorial crab must survive long enough to teach its telegraph");
+});
+
+test("starter camp is a reachable connected upgrade graph with original art", async () => {
+  const camp = BUILDINGS.filter((building) => building.map === "shoal");
+  assert.equal(camp.length, 6);
+  assert.equal(new Set(camp.map((building) => building.id)).size, camp.length);
+  for (const building of camp) {
+    assert.equal(blocked("shoal", building.c, building.r), false, `${building.id} must stand on open ground`);
+    assert.equal(reachable("shoal", SPAWN.shoal, building), true, `${building.id} must be reachable`);
+    assert.equal(building.sheet, "shoal-settlement-v1");
+    assert.equal(building.upgrades?.length, 1, `${building.id} needs a second level`);
+    for (const dependency of building.requires ?? []) {
+      assert.ok(camp.some((candidate) => candidate.id === dependency), `${building.id} depends on a missing camp building`);
+    }
+  }
+  assert.ok(camp.some((building) => building.id === "shorefire" && !building.requires?.length));
+  assert.ok(camp.some((building) => building.id === "pier" && building.requires?.includes("workbench")));
+  const art = await readFile(new URL("../public/sprites/shoal-settlement-v1.png", import.meta.url));
+  assert.ok(art.byteLength > 100_000);
 });
 
 test("starter island lore is discoverable and backed by original art", async () => {

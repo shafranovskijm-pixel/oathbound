@@ -67,7 +67,11 @@ export type Snapshot = {
     desc: string;
     bonus: string;
     sprite: number;
+    sheet: "keep" | "shoal-settlement-v1";
     built: boolean;
+    level: number;
+    maxLevel: number;
+    action: "build" | "upgrade" | "complete";
     ok: boolean;
   }[];
   waypoints: { id: WpId; name: string; unlocked: boolean }[];
@@ -224,6 +228,13 @@ const SHOAL_WRECK = { c: 4, r: 14 };
 const SHOAL_BOAT = { c: 23, r: 13 };
 const SHOAL_BAR = { c: 19, r: 7 };
 const SHOAL_BOAT_NEEDS: ItemId[] = ["wood", "wood", "wood", "wood", "cloth", "cloth", "ore"];
+const SHOAL_BUILD_LINKS: [BuildId, BuildId][] = [
+  ["shorefire", "shelter"],
+  ["shorefire", "cache"],
+  ["shorefire", "workbench"],
+  ["workbench", "watchpost"],
+  ["workbench", "pier"],
+];
 const STRAIT_REEFS = [[13, 4], [20, 16], [29, 6], [38, 15]] as const;
 const STRAIT_WRECK = { c: 10, r: 18 };
 const STRAIT_VORTEX = { c: 27, r: 12 };
@@ -399,6 +410,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let pending: TalentId[] = [];
   const cds: Record<string, number> = {};
   const built = new Set<BuildId>();
+  const buildingLevels = new Map<BuildId, number>();
+  const buildFx = new Map<BuildId, number>();
   const raised = new Map<SiteId, string>();
   let siteArmor = 0;
   const stones = new Set<WpId>();
@@ -534,7 +547,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "shoal-settlement-v1", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -553,6 +566,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
   function itemCount(id: ItemId) {
     return items.filter((candidate) => candidate === id).length;
+  }
+  function buildingLevel(id: BuildId) {
+    return buildingLevels.get(id) ?? (built.has(id) ? 1 : 0);
+  }
+  function shoalBoatNeeds() {
+    return built.has("pier") ? (["wood", "wood", "cloth", "ore"] satisfies ItemId[]) : SHOAL_BOAT_NEEDS;
   }
   function itemNeeds(ids: ItemId[] = []) {
     const counts = new Map<ItemId, number>();
@@ -646,7 +665,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function recipeGold(r: (typeof CRAFT)[number]) {
-    return Math.max(0, r.gold - (activeHavenChoice() === "saltworks" ? 4 : 0));
+    const shoalDiscount = map === "shoal" && buildingLevel("workbench") >= 2 ? 1 : 0;
+    return Math.max(0, r.gold - (activeHavenChoice() === "saltworks" ? 4 : 0) - shoalDiscount);
   }
 
   function havenStatus() {
@@ -860,13 +880,13 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function canCraftHere() {
-    return (map === "keep" && built.has("forge")) || !!currentSiteOption()?.craft;
+    return (map === "keep" && built.has("forge")) || (map === "shoal" && built.has("workbench")) || !!currentSiteOption()?.craft;
   }
 
   function craft(out: ItemId) {
     const r = CRAFT.find((x) => x.out === out);
     if (!r || !canCraftHere()) {
-      say("Нужна кузница во дворе или ремесленная постройка на участке.");
+      say("Нужен верстак, кузница во дворе или ремесленная постройка на участке.");
       emit(true);
       return;
     }
@@ -898,7 +918,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       { text: "Обыскать разбитый сундук и одеться", done: opened.has("shoal-wreck") },
       { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
       { text: `Услышать голоса острова (${Math.min(3, loreCount())}/3)`, done: loreCount() >= 3 },
-      { text: "Собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
+      { text: "Разжечь костёр и поставить верстак", done: built.has("shorefire") && built.has("workbench") },
+      { text: built.has("pier") ? "Собрать лодку: 2 дерева · 1 полотно · 1 руда" : "Поставить причал или собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
       { text: transport === "boat" || map === "strait" ? "Провести лодку через пролив и отбиться от шлюпов" : "Спустить лодку и встать за штурвал", done: flags.has("leftShoal") },
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
       { text: "Поднять Двор клятвы (юг от дороги)", done: flags.has("keep") },
@@ -938,7 +959,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (!flags.has("leftShoal")) {
       if (!opened.has("shoal-wreck")) return "Цель: осмотри разбитый сундук на западном пляже — там первая одежда, клинок и несколько монет.";
       if (!has("mapshard")) return "Цель: зайди в бар «Три доски» на севере тропы и купи у Нолла первый обрывок карты за 3 золота.";
-      if (!flags.has("raftBuilt")) return "Цель: собери 4 дерева, 2 полотна и 1 руду. Каркас лодки ждёт на восточном пляже.";
+      if (!built.has("shorefire")) return "Цель: собери плавник и нажми B — разожги первый костёр лагеря.";
+      if (!built.has("workbench")) return "Цель: соедини лагерь дорожкой — поставь верстак из плавника.";
+      if (!flags.has("raftBuilt")) return built.has("pier") ? "Цель: причал облегчает работу. Для лодки осталось 2 дерева, 1 полотно и 1 руда." : "Цель: поставь причал или собери для лодки 4 дерева, 2 полотна и 1 руду.";
       if (transport !== "boat") return "Цель: кликни по готовой лодке, встань за штурвал и сам выведи её с восточного пляжа.";
       return map === "strait" ? "Цель: пройди пролив. WASD — штурвал, ЛКМ — гарпун, Shift — резкий манёвр." : "Цель: веди лодку на восток через прибой. Ты управляешь ею напрямую.";
     }
@@ -1018,24 +1041,38 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       meleeCd,
       dodgeCd,
       transport: transportInfo(),
-      buildings: BUILDINGS.map((b) => ({
-        id: b.id,
-        name: b.name,
-        cost: b.cost,
-        tier: b.tier,
-        energy: b.energy,
-        need: itemNeeds(b.need),
-        requires: (b.requires ?? []).filter((id) => !built.has(id)).map((id) => BUILDINGS.find((candidate) => candidate.id === id)?.name ?? id),
-        desc: b.desc,
-        bonus: b.bonus,
-        sprite: b.sprite,
-        built: built.has(b.id),
-        ok: !built.has(b.id) && (b.requires ?? []).every((id) => built.has(id)) && canAfford(b.cost, b.energy, b.need),
-      })),
+      buildings: BUILDINGS.filter((b) => b.map === map).map((b) => {
+        const currentLevel = buildingLevel(b.id);
+        const maxLevel = 1 + (b.upgrades?.length ?? 0);
+        const upgrade = currentLevel > 0 ? b.upgrades?.[currentLevel - 1] : undefined;
+        const complete = currentLevel >= maxLevel;
+        const step = currentLevel === 0 ? b : upgrade;
+        const stepCost = complete ? 0 : (step?.cost ?? 0);
+        const stepEnergy = complete ? 0 : (step?.energy ?? 0);
+        const stepNeed = complete ? [] : (step?.need ?? []);
+        return {
+          id: b.id,
+          name: b.name,
+          cost: stepCost,
+          tier: b.tier,
+          energy: stepEnergy,
+          need: itemNeeds(stepNeed),
+          requires: currentLevel === 0 ? (b.requires ?? []).filter((id) => !built.has(id)).map((id) => BUILDINGS.find((candidate) => candidate.id === id)?.name ?? id) : [],
+          desc: b.desc,
+          bonus: upgrade?.bonus ?? b.bonus,
+          sprite: b.sprite,
+          sheet: b.sheet,
+          built: currentLevel > 0,
+          level: currentLevel,
+          maxLevel,
+          action: complete ? "complete" as const : currentLevel > 0 ? "upgrade" as const : "build" as const,
+          ok: !complete && (currentLevel > 0 || (b.requires ?? []).every((id) => built.has(id))) && canAfford(stepCost, stepEnergy, stepNeed),
+        };
+      }),
       waypoints: WAYPOINTS.map((w) => ({ id: w.id, name: w.name, unlocked: stones.has(w.id) })),
       portalOpen: !!fieldPortal,
       inKeep: map === "keep",
-      canRest: (map === "keep" && built.has("hearth")) || (() => {
+      canRest: (map === "keep" && built.has("hearth")) || (map === "shoal" && (built.has("shorefire") || built.has("shelter"))) || (() => {
         const p = siteAt(map, tileC(), tileR());
         if (!p) return false;
         const o = p.options.find((x) => x.id === raised.get(p.id));
@@ -1208,6 +1245,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       owned: [...owned],
       pending: [...pending],
       built: [...built],
+      buildingLevels: [...buildingLevels],
       raised: [...raised],
       stones: [...stones],
       fieldPortal: fieldPortal ? { ...fieldPortal } : null,
@@ -1270,6 +1308,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     pending = save.pending.filter((id) => id in TALENTS && !owned.has(id));
     built.clear();
     save.built.filter((id) => BUILDINGS.some((building) => building.id === id)).forEach((id) => built.add(id));
+    buildingLevels.clear();
+    if (save.buildingLevels) {
+      for (const [id, savedLevel] of save.buildingLevels) {
+        const building = BUILDINGS.find((candidate) => candidate.id === id);
+        if (!building || !built.has(id)) continue;
+        const maxLevel = 1 + (building.upgrades?.length ?? 0);
+        buildingLevels.set(id, Math.max(1, Math.min(maxLevel, Math.floor(savedLevel))));
+      }
+    }
+    for (const id of built) if (!buildingLevels.has(id)) buildingLevels.set(id, 1);
     raised.clear();
     for (const [siteId, optionId] of save.raised) {
       const site = SITES.find((candidate) => candidate.id === siteId);
@@ -1476,6 +1524,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     pending = [];
     resetMods();
     built.clear();
+    buildingLevels.clear();
+    buildFx.clear();
     raised.clear();
     siteArmor = 0;
     stones.clear();
@@ -1767,7 +1817,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   function armor() {
     const helmArmor = worn.helm === "tidehelm" || worn.helm === "saltvisor" ? 2 : worn.helm === "havenhood" || worn.helm === "firecrown" ? 1 : 0;
-    return baseArmor + mods.armor + siteArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + helmArmor;
+    const shelterArmor = map === "shoal" && buildingLevel("shelter") >= 2 ? 1 : 0;
+    return baseArmor + mods.armor + siteArmor + shelterArmor + (worn.arm === "shellmail" ? 5 : worn.arm === "chain" ? 3 : worn.arm === "leather" ? 1 : 0) + helmArmor;
   }
   function moveSpeed() {
     if (transport === "boat") return 154;
@@ -1792,6 +1843,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function meleeBase() {
     let d = 3 + Math.floor(str / 3) + (worn.wep === "harpoon" ? 7 : worn.wep === "steel" ? 5 : worn.wep === "sword" ? 3 : worn.wep === "shiv" ? 2 : heroId === "vessa" ? 1 : 2);
     if (islandMap() && activeHavenChoice() === "stormfire") d += 3;
+    if (map === "shoal" && buildingLevel("watchpost") >= 2) d += 2;
     if (worn.helm === "firecrown") d += 2;
     return d + keepDmg;
   }
@@ -2272,7 +2324,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const node = gatherNodeAt(map, tileC(), tileR());
     if (node && !opened.has(`node:${node.id}`)) {
       opened.add(`node:${node.id}`);
-      const amount = node.amount + (activeHavenChoice() === "saltworks" ? 1 : 0);
+      const campStock = map === "shoal" && buildingLevel("cache") >= 2 ? 1 : 0;
+      const amount = node.amount + (activeHavenChoice() === "saltworks" ? 1 : 0) + campStock;
       for (let i = 0; i < amount; i++) give(node.item);
       say(`${node.label}. +${amount} · ${ITEM[node.item].name}.`);
       burst(node.c * TILE + 16, node.r * TILE + 16, "#d8d0a8", 12);
@@ -2326,15 +2379,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const distance = Math.hypot(SHOAL_BOAT.c * TILE + 16 - px, SHOAL_BOAT.r * TILE + 16 - py);
     if (distance > 48) return false;
     if (!flags.has("raftBuilt")) {
-      if (!hasNeeds(SHOAL_BOAT_NEEDS)) {
-        const missing = itemNeeds(SHOAL_BOAT_NEEDS).filter((part) => !part.ok).map((part) => `${part.name} ${part.have}/${part.need}`).join(" · ");
+      const needs = shoalBoatNeeds();
+      if (!hasNeeds(needs)) {
+        const missing = itemNeeds(needs).filter((part) => !part.ok).map((part) => `${part.name} ${part.have}/${part.need}`).join(" · ");
         say(`Лодка не готова. Не хватает: ${missing}. Все нужные места подсвечены на острове.`);
         emit(true);
         return true;
       }
-      spendNeeds(SHOAL_BOAT_NEEDS);
+      spendNeeds(needs);
       flags.add("raftBuilt");
-      say("Лодка готова. Доски связаны, парус держит ветер, камень лёг в днище. Осталось забрать обрывок карты у Нолла.");
+      say(built.has("pier") ? "Лодка готова у собственного причала. Лагерь остаётся за спиной, но теперь тебе есть куда вернуться." : "Лодка готова. Доски связаны, парус держит ветер, камень лёг в днище. Осталось забрать обрывок карты у Нолла.");
       burst(SHOAL_BOAT.c * TILE + 16, SHOAL_BOAT.r * TILE + 16, "#9ed8d0", 28);
       audio.ok();
       emit(true);
@@ -2441,13 +2495,23 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       return;
     }
     if (doGet()) return;
-    if (map === "keep") {
+    if (map === "keep" || map === "shoal") {
       for (const b of BUILDINGS) {
-        if (!built.has(b.id)) continue;
+        if (b.map !== map) continue;
         const d = Math.hypot(b.c * TILE + 16 - px, b.r * TILE + 16 - py);
-        if (d < 40) {
-          if (b.id === "hearth") {
+        if (d < 52) {
+          if (!built.has(b.id)) {
+            mode = "build";
+            emit(true);
+            return;
+          }
+          if (b.id === "hearth" || b.id === "shorefire" || b.id === "shelter") {
             rest();
+            return;
+          }
+          if (b.id === "forge" || b.id === "workbench") {
+            mode = "build";
+            emit(true);
             return;
           }
           say(`${b.name}. ${b.bonus}.`);
@@ -2455,9 +2519,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           return;
         }
       }
-      mode = "build";
-      emit(true);
-      return;
+      if (map === "keep") {
+        mode = "build";
+        emit(true);
+        return;
+      }
     }
     for (const w of WAYPOINTS) {
       if (w.map !== map) continue;
@@ -2622,39 +2688,47 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function doBuild(id: BuildId) {
-    if (map !== "keep") {
-      say("Строить можно только во дворе.");
+    const b = BUILDINGS.find((x) => x.id === id);
+    if (!b || map !== b.map) {
+      say("Эта постройка относится к другому поселению.");
       emit(true);
       return;
     }
-    const b = BUILDINGS.find((x) => x.id === id);
-    if (!b || built.has(id)) return;
-    const missingBuilding = (b.requires ?? []).find((required) => !built.has(required));
+    const currentLevel = buildingLevel(id);
+    const maxLevel = 1 + (b.upgrades?.length ?? 0);
+    if (currentLevel >= maxLevel) return;
+    const missingBuilding = currentLevel === 0 ? (b.requires ?? []).find((required) => !built.has(required)) : undefined;
     if (missingBuilding) {
       say(`Сначала построй: ${BUILDINGS.find((candidate) => candidate.id === missingBuilding)?.name ?? missingBuilding}.`);
       emit(true);
       return;
     }
-    if (!canAfford(b.cost, b.energy, b.need)) {
-      const missing = itemNeeds(b.need).filter((part) => !part.ok).map((part) => part.name.toLowerCase());
-      say(gold < b.cost ? "Не хватает золота." : food < b.energy ? "Не хватает сил на стройку. Поешь или отдохни." : `Не хватает: ${missing.join(", ")}.`);
+    const step = currentLevel === 0 ? b : b.upgrades?.[currentLevel - 1];
+    if (!step) return;
+    if (!canAfford(step.cost, step.energy, step.need)) {
+      const missing = itemNeeds(step.need).filter((part) => !part.ok).map((part) => part.name.toLowerCase());
+      say(gold < step.cost ? "Не хватает золота." : food < step.energy ? "Не хватает сил на стройку. Поешь или отдохни." : `Не хватает: ${missing.join(", ")}.`);
       emit(true);
       return;
     }
-    spendCost(b.cost, b.energy, b.need);
+    spendCost(step.cost, step.energy, step.need);
     built.add(id);
-    if (id === "barracks") {
+    const nextLevel = currentLevel + 1;
+    buildingLevels.set(id, nextLevel);
+    buildFx.set(id, 1.35);
+    if (currentLevel === 0 && id === "barracks") {
       maxHp += 8;
       hp += 8;
     }
-    if (id === "tower") {
+    if (currentLevel === 0 && id === "tower") {
       maxMp += 6;
       mp += 6;
     }
     recalcKeep();
-    say(`${b.name} стоит. ${b.bonus}. Потрачено ${b.cost} золота и ${b.energy} сил.`);
+    const resultBonus = currentLevel === 0 ? b.bonus : step.bonus;
+    say(currentLevel === 0 ? `${b.name} стоит. ${resultBonus}. Лагерь стал больше.` : `${b.name} улучшен до уровня ${nextLevel}. ${resultBonus}.`);
     audio.ok();
-    burst(b.c * TILE + 16, b.r * TILE + 16, id === "hearth" ? "#e07a4a" : "#d8c070", id === "hearth" ? 28 : 14);
+    burst(b.c * TILE + 16, b.r * TILE + 16, id === "hearth" || id === "shorefire" ? "#e07a4a" : "#d8c070", currentLevel === 0 ? 28 : 20);
     emit(true);
   }
 
@@ -2712,15 +2786,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const pick = plot ? raised.get(plot.id) : undefined;
     const opt = plot?.options.find((o) => o.id === pick);
     const atHearth = map === "keep" && built.has("hearth");
-    if (!atHearth && !opt?.rest) {
-      say("Нужен очаг во дворе или изба с кроватью на участке.");
+    const atShoalCamp = map === "shoal" && (built.has("shorefire") || built.has("shelter"));
+    if (!atHearth && !atShoalCamp && !opt?.rest) {
+      say("Нужен костёр, кров или изба с постелью.");
       emit(true);
       return;
     }
     hp = maxHp;
     mp = maxMp;
-    food = Math.max(food, 32);
-    say(atHearth ? "Очаг. Силы вернулись." : `${opt?.name}. Силы вернулись.`);
+    food = Math.max(food, atShoalCamp && buildingLevel("shorefire") >= 2 ? 36 : 32);
+    say(atHearth ? "Очаг. Силы вернулись." : atShoalCamp ? "Ночь у берега. Огонь шуршит, парус держит ветер. Силы вернулись." : `${opt?.name}. Силы вернулись.`);
     audio.ok();
     emit(true);
   }
@@ -3427,6 +3502,35 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         }
       }
     }
+    for (const [id, life] of buildFx) {
+      const next = life - dt;
+      if (next <= 0) buildFx.delete(id);
+      else buildFx.set(id, next);
+    }
+    if (map === "shoal" && built.has("shorefire") && Math.random() < dt * 16) {
+      const b = BUILDINGS.find((candidate) => candidate.id === "shorefire")!;
+      sparks.push({
+        x: b.c * TILE + 16 + (Math.random() - 0.5) * 12,
+        y: b.r * TILE + 4,
+        vx: (Math.random() - 0.5) * 18,
+        vy: -34 - Math.random() * 48,
+        life: 0.35 + Math.random() * 0.35,
+        color: Math.random() > 0.5 ? "#e07a4a" : "#f0d58a",
+        size: 2 + Math.random() * 2,
+      });
+    }
+    if (map === "shoal" && built.has("workbench") && Math.random() < dt * 7) {
+      const b = BUILDINGS.find((candidate) => candidate.id === "workbench")!;
+      sparks.push({
+        x: b.c * TILE + 16,
+        y: b.r * TILE + 3,
+        vx: (Math.random() - 0.5) * 34,
+        vy: -45 - Math.random() * 35,
+        life: 0.35,
+        color: "#e8d48a",
+        size: 1.5,
+      });
+    }
     if (map === "keep" && built.has("hearth") && Math.random() < dt * 18) {
       const b = BUILDINGS.find((x) => x.id === "hearth")!;
       sparks.push({
@@ -3738,6 +3842,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fillRect(sx - 2, sy - 3, 5, 2);
       ctx.fillRect(sx, sy + 1, 1, 2);
     }
+    for (const building of BUILDINGS) {
+      if (building.map !== map) continue;
+      const sx = x0 + ((building.c + 0.5) / size.cols) * mw;
+      const sy = y0 + ((building.r + 0.5) / size.rows) * mh;
+      const on = built.has(building.id);
+      ctx.fillStyle = on ? "#f0d58a" : (building.requires ?? []).every((id) => built.has(id)) ? "#9ed8d0" : "#665e52";
+      ctx.fillRect(sx - 3, sy - 1, 7, 4);
+      ctx.fillRect(sx - 2, sy - 3, 5, 2);
+    }
     ctx.fillStyle = "#e8e4d8";
     const heroX = x0 + (px / (size.cols * TILE)) * mw;
     const heroY = y0 + (py / (size.rows * TILE)) * mh;
@@ -3844,6 +3957,46 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     drawAmbientLife();
 
     if (map === "shoal") {
+      for (const [fromId, toId] of SHOAL_BUILD_LINKS) {
+        const from = BUILDINGS.find((candidate) => candidate.id === fromId)!;
+        const to = BUILDINGS.find((candidate) => candidate.id === toId)!;
+        const fromBuilt = built.has(fromId);
+        const toBuilt = built.has(toId);
+        if (!fromBuilt) continue;
+        const a = wrld(from.c * TILE + 16, from.r * TILE + 18);
+        const b = wrld(to.c * TILE + 16, to.r * TILE + 18);
+        ctx.save();
+        ctx.lineCap = "round";
+        if (!toBuilt) ctx.setLineDash([5, 9]);
+        ctx.globalAlpha = toBuilt ? 0.62 : 0.25 + Math.sin(time * 2 + to.sprite) * 0.04;
+        ctx.strokeStyle = "#261d15";
+        ctx.lineWidth = toBuilt ? 13 : 8;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.strokeStyle = toBuilt ? "#9b7951" : "#d2b477";
+        ctx.lineWidth = toBuilt ? 8 : 3;
+        ctx.stroke();
+        if (toBuilt) {
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const length = Math.hypot(dx, dy) || 1;
+          const nx = -dy / length;
+          const ny = dx / length;
+          ctx.strokeStyle = "rgba(42,28,18,0.7)";
+          ctx.lineWidth = 2;
+          for (let p = 12; p < length - 8; p += 15) {
+            const x = a.x + (dx / length) * p;
+            const y = a.y + (dy / length) * p;
+            ctx.beginPath();
+            ctx.moveTo(x - nx * 5, y - ny * 5);
+            ctx.lineTo(x + nx * 5, y + ny * 5);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
       const wreck = wrld(SHOAL_WRECK.c * TILE - 32, SHOAL_WRECK.r * TILE - 48);
       sheetGrid(imgs["prologue-world"], 0, 3, 2, wreck.x, wreck.y, 96);
       if (!opened.has("shoal-wreck")) drawWorldPrompt(SHOAL_WRECK.c * TILE + 16, SHOAL_WRECK.r * TILE + 2, "Обыскать сундук", true);
@@ -3857,7 +4010,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         drawWorldPrompt(
           SHOAL_BOAT.c * TILE + 16,
           SHOAL_BOAT.r * TILE + 5,
-          flags.has("raftBuilt") ? (has("mapshard") ? "Встать за штурвал" : "Сначала взять карту") : "Собрать лодку · 4 дерево · 2 полотно · 1 руда",
+          flags.has("raftBuilt") ? (has("mapshard") ? "Встать за штурвал" : "Сначала взять карту") : built.has("pier") ? "Собрать лодку · 2 дерево · полотно · руда" : "Собрать лодку · 4 дерево · 2 полотно · руда",
           true,
         );
       }
@@ -3942,7 +4095,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (const node of GATHER_NODES) {
       if (node.map !== map || opened.has(`node:${node.id}`)) continue;
       const p = wrld(node.c * TILE, node.r * TILE - 7);
-      if (node.map === "shoal" && node.item === "wood") sheetGrid(imgs["prologue-world"], 1, 3, 2, p.x - 8, p.y - 12, 48);
+      if (node.map === "shoal" && (node.item === "wood" || node.item === "driftwood")) sheetGrid(imgs["prologue-world"], 1, 3, 2, p.x - 8, p.y - 12, 48);
       else sheetGrid(imgs.items, node.sprite, 3, 3, p.x, p.y, 32);
       drawInteractionPulse(node.c * TILE + 16, node.r * TILE + 16, node.label, true);
     }
@@ -3979,8 +4132,60 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       if (opt.craft || opt.rest) drawWorldPrompt(s.c * TILE + 16, s.r * TILE + 2, opt.craft ? "Мастерская" : "Отдохнуть");
     }
+    if (map === "shoal") {
+      for (const b of BUILDINGS) {
+        if (b.map !== "shoal") continue;
+        const level = buildingLevel(b.id);
+        const ready = level === 0 && (b.requires ?? []).every((id) => built.has(id));
+        const size = level >= 2 ? 110 : 102;
+        const p = wrld(b.c * TILE + 16 - size / 2, b.r * TILE + 18 - size * 0.72);
+        if (level === 0) {
+          const foundation = wrld(b.c * TILE - 24, b.r * TILE - 36);
+          ctx.save();
+          ctx.globalAlpha = ready ? 0.32 + Math.sin(time * 2.4 + b.sprite) * 0.05 : 0.13;
+          ctx.filter = ready ? "grayscale(0.55) sepia(0.45) brightness(1.05)" : "grayscale(1) brightness(0.72)";
+          sheetGrid(imgs["site-foundations"], b.sprite, 3, 2, foundation.x, foundation.y, 80);
+          sheetGrid(imgs[b.sheet], b.sprite, 3, 2, p.x, p.y, size);
+          ctx.restore();
+          if (ready || Math.hypot(b.c * TILE + 16 - px, b.r * TILE + 16 - py) < 112) {
+            drawWorldPrompt(b.c * TILE + 16, b.r * TILE - 1, ready ? `Построить · ${b.name}` : `Сначала · ${b.requires?.map((id) => BUILDINGS.find((candidate) => candidate.id === id)?.name).join(", ")}`);
+          }
+          continue;
+        }
+        if (level >= 2) {
+          const center = wrld(b.c * TILE + 16, b.r * TILE + 8);
+          const glow = ctx.createRadialGradient(center.x, center.y, 4, center.x, center.y, 58);
+          glow.addColorStop(0, b.id === "shorefire" ? "rgba(238,142,70,0.2)" : "rgba(239,207,135,0.12)");
+          glow.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = glow;
+          ctx.fillRect(center.x - 58, center.y - 58, 116, 116);
+        }
+        sheetGrid(imgs[b.sheet], b.sprite, 3, 2, p.x, p.y, size);
+        const fx = buildFx.get(b.id) ?? 0;
+        if (fx > 0) {
+          const progress = 1 - fx / 1.35;
+          ctx.save();
+          ctx.globalAlpha = Math.min(0.75, fx);
+          ctx.strokeStyle = "#d9b879";
+          ctx.lineWidth = 3;
+          for (let i = 0; i < 4; i++) {
+            const x = p.x + 18 + i * 21;
+            ctx.beginPath();
+            ctx.moveTo(x, p.y + size * (0.2 + progress * 0.25));
+            ctx.lineTo(x + (i % 2 ? 8 : -8), p.y + size * 0.82);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        const near = Math.hypot(b.c * TILE + 16 - px, b.r * TILE + 16 - py) < 74;
+        if (near && (b.id === "shorefire" || b.id === "shelter" || b.id === "workbench")) {
+          drawWorldPrompt(b.c * TILE + 16, b.r * TILE - 1, b.id === "workbench" ? "Крафт и улучшения" : "Отдохнуть");
+        }
+      }
+    }
     if (map === "keep") {
       for (const b of BUILDINGS) {
+        if (b.map !== "keep") continue;
         const s = wrld(b.c * TILE - 8, b.r * TILE - 18);
         if (!built.has(b.id)) {
           ctx.save();
@@ -4988,7 +5193,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     travel,
     toggleBuild() {
       if (mode === "build" || mode === "site") mode = "play";
-      else if (map === "keep" && (mode === "play" || mode === "way" || mode === "atlas")) mode = "build";
+      else if ((map === "keep" || map === "shoal") && (mode === "play" || mode === "way" || mode === "atlas")) mode = "build";
       else if (mode === "play") {
         const site = siteAt(map, tileC(), tileR());
         const option = site?.options.find((candidate) => candidate.id === raised.get(site.id));

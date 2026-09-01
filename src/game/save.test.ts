@@ -31,6 +31,7 @@ const BASE: GameSave = {
   owned: [],
   pending: [],
   built: [],
+  buildingLevels: [],
   raised: [],
   stones: [],
   fieldPortal: null,
@@ -92,6 +93,17 @@ test("saves from before courtyard defense still load", () => {
   const decoded = decodeGameSave(JSON.stringify(legacy));
   assert.ok(decoded);
   assert.equal(decoded.keepDefense, undefined);
+});
+
+test("settlement upgrades survive and older building saves default cleanly", () => {
+  const upgraded: GameSave = { ...BASE, built: ["shorefire", "workbench"], buildingLevels: [["shorefire", 2], ["workbench", 1]] };
+  const decoded = decodeGameSave(JSON.stringify(upgraded));
+  assert.deepEqual(decoded?.buildingLevels, [["shorefire", 2], ["workbench", 1]]);
+
+  const { buildingLevels: _levels, ...legacy } = upgraded;
+  const oldDecoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(oldDecoded);
+  assert.equal(oldDecoded.buildingLevels, undefined);
 });
 
 test("boat transport and enemy guards survive a save round-trip", () => {
