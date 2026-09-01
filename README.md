@@ -2,6 +2,8 @@
 
 2D CRPG в духе Ultima: остров, Вестмер, Двор клятвы, пиратский киль.
 
+**Играть в браузере:** [oathbound-salt-keel.shafranovskij-m.chatgpt.site](https://oathbound-salt-keel.shafranovskij-m.chatgpt.site)
+
 ## Где править контент
 
 Главный файл мира и строек:
