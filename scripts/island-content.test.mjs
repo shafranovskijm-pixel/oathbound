@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { ITEM, NPCS } from "../src/game/content.ts";
+import { ITEM, MOB, NPCS } from "../src/game/content.ts";
 import { blocked, MAPS, SPAWN } from "../src/game/world.ts";
 
 const source = JSON.parse(await readFile(new URL("../src/game/oathbound.json", import.meta.url), "utf8"));
@@ -83,5 +83,26 @@ test("living haven has a reachable quest giver and three helmet rewards", () => 
   for (const id of ["havenhood", "saltvisor", "firecrown"]) {
     assert.equal(ITEM[id].slot, "helm");
     assert.ok(ITEM[id].name.length > 4);
+  }
+});
+
+test("haven siege content and every landing point are valid", () => {
+  const eira = NPCS.find((npc) => npc.id === "eira");
+  const ryn = NPCS.find((npc) => npc.id === "ryn");
+  assert.ok(eira?.words.RAID);
+  assert.ok(eira?.words.REPAIR);
+  assert.ok(ryn?.words.RAID);
+  assert.ok(MOB.raider.hp >= 20);
+  assert.ok(ITEM.keelsigil.name.toLowerCase().includes("киля"));
+  const waves = [
+    [[7, 18], [21, 20], [6, 13]],
+    [[23, 17], [28, 12], [9, 16], [21, 20]],
+    [[6, 13], [7, 18], [23, 17], [29, 16], [18, 8]],
+  ];
+  for (const points of waves) {
+    for (const [c, r] of points) {
+      assert.equal(blocked("isle", c, r), false, `raid spawn ${c},${r} must be open`);
+      assert.equal(reachable("isle", { c, r }, { c: 13, r: 17 }), true, `raid spawn ${c},${r} must reach the haven`);
+    }
   }
 });

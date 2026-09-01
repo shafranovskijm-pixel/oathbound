@@ -35,6 +35,7 @@ const BASE: GameSave = {
   stones: [],
   fieldPortal: null,
   vaultVisit: false,
+  raid: { active: true, wave: 2, havenHp: 64, maxHavenHp: 110, nextWave: 0, towerCd: 0.8 },
   log: ["Начало"],
   activeSlot: 0,
   mobs: [],
@@ -58,6 +59,7 @@ test("corrupt and incompatible saves fail closed", () => {
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, version: 2 })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, hp: "many" })), null);
   assert.equal(decodeGameSave(JSON.stringify({ ...BASE, map: "nowhere" })), null);
+  assert.equal(decodeGameSave(JSON.stringify({ ...BASE, raid: { active: true, wave: "two" } })), null);
 });
 
 test("legacy saves without the helmet slot still load", () => {
@@ -65,4 +67,11 @@ test("legacy saves without the helmet slot still load", () => {
   const decoded = decodeGameSave(JSON.stringify(legacy));
   assert.ok(decoded);
   assert.equal(decoded.worn.helm, undefined);
+});
+
+test("saves from before haven raids still load", () => {
+  const { raid: _raid, ...legacy } = BASE;
+  const decoded = decodeGameSave(JSON.stringify(legacy));
+  assert.ok(decoded);
+  assert.equal(decoded.raid, undefined);
 });
