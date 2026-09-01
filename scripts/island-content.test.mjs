@@ -62,6 +62,16 @@ test("starter shoal teaches gathering, gold, gear and boat construction", () => 
   assert.equal(noll.map, "shoal");
   assert.ok(noll.words.MAP.includes("Три золотых"));
   assert.ok(noll.words.BOAT.includes("Четыре"));
+  assert.ok(MOB.crab.hp >= 28, "the tutorial crab must survive long enough to teach its telegraph");
+});
+
+test("the maiden voyage has a steerable sea corridor and worthy ships", () => {
+  assert.ok(MAPS.strait.length >= 20);
+  assert.ok(MAPS.strait[0].length >= 40);
+  assert.equal(MAPS.strait[SPAWN.strait.r][SPAWN.strait.c], "~");
+  assert.ok(MAPS.strait.flat().filter((tile) => tile === "M").length >= 12, "the strait needs visible reefs");
+  assert.ok(MOB.skiff.hp >= 40);
+  assert.ok(MOB.skiff.atk >= 6);
 });
 
 test("island gathering nodes have stable ids and reachable positions", () => {
