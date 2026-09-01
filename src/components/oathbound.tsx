@@ -53,6 +53,8 @@ const IDLE: Snapshot = {
   place: "",
   xpNeed: 36,
   meleeCd: 0,
+  dodgeCd: 0,
+  transport: { id: "foot", name: "Пешком", speed: 118, action: "Shift — уворот" },
   buildings: [],
   waypoints: [],
   portalOpen: false,
@@ -252,6 +254,19 @@ function HeroPaperDoll({
 }
 
 function MobPortrait({ kind }: { kind: NonNullable<Snapshot["target"]>["kind"] }) {
+  if (kind === "skiff") {
+    return (
+      <span
+        className="target-portrait"
+        style={{
+          backgroundImage: "url(/sprites/prologue-world.png)",
+          backgroundSize: "300% 200%",
+          backgroundPosition: "50% 100%",
+        }}
+        aria-hidden
+      />
+    );
+  }
   const sea = kind === "crab" || kind === "brine";
   const index = sea ? 0 : MOB[kind].sprite;
   const column = index % 2;
@@ -573,6 +588,13 @@ export function Oathbound() {
 
         {playing ? (
           <div className="absolute top-3 right-3 flex flex-col items-end gap-2 pointer-events-auto hud-ink">
+            {snap.transport.id !== "foot" ? (
+              <div className="rounded-md border border-[#9ed8d0]/45 bg-bg/90 px-3 py-2 text-right shadow-lg backdrop-blur-sm">
+                <p className="font-mono text-[9px] tracking-[0.18em] text-[#9ed8d0]">ЗА ШТУРВАЛОМ</p>
+                <p className="mt-0.5 text-xs font-semibold text-fg">{snap.transport.name} · {snap.transport.speed}</p>
+                <p className="mt-0.5 font-mono text-[9px] text-muted">{snap.transport.action}</p>
+              </div>
+            ) : null}
             <div className="flex items-center gap-4">
               <span className="hud-stat">
                 <HudIco id="gold" />
@@ -655,8 +677,9 @@ export function Oathbound() {
         ) : null}
 
         {open ? (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-4 flex flex-wrap items-end justify-center gap-2 pointer-events-auto max-w-xl px-3 hud-ink">
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-4 flex flex-wrap items-end justify-center gap-2 pointer-events-auto max-w-2xl px-3 hud-ink">
             <Slot label="ЛКМ" name="Удар" icon={<HudIco id="melee" />} ready={snap.meleeCd} max={0.4} disabled={snap.mode !== "play"} on={snap.activeSlot < 0} onClick={() => g.current?.select(-1)} />
+            <Slot label="Shift" name={snap.transport.id === "boat" ? "Манёвр" : "Уворот"} icon={<HudIco id="dash" />} ready={snap.dodgeCd} max={snap.transport.id === "boat" ? 1.4 : 1.05} disabled={snap.mode !== "play"} onClick={() => g.current?.dodge()} />
             {snap.spells.map((s, i) => (
               <Slot
                 key={s.id}

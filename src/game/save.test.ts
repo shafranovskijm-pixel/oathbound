@@ -93,3 +93,18 @@ test("saves from before courtyard defense still load", () => {
   assert.ok(decoded);
   assert.equal(decoded.keepDefense, undefined);
 });
+
+test("boat transport and enemy guards survive a save round-trip", () => {
+  const voyage: GameSave = {
+    ...BASE,
+    map: "strait",
+    transport: "boat",
+    transportAngle: 0.75,
+    mobs: [{ id: 7, map: "strait", x: 400, y: 280, kind: "skiff", hp: 31, max: 44, wait: 0, stun: 0, slow: 0, poison: 0, atkCd: 0, flash: 0, guard: 0 }],
+  };
+  const decoded = decodeGameSave(JSON.stringify(voyage));
+  assert.ok(decoded);
+  assert.equal(decoded.transport, "boat");
+  assert.equal(decoded.mobs[0].kind, "skiff");
+  assert.equal(decoded.mobs[0].guard, 0);
+});

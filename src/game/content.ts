@@ -333,7 +333,7 @@ export const GREET: Record<NpcId, Record<Guise, string>> = {
   },
 };
 
-export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab" | "brine" | "raider";
+export type MobKind = "orc" | "skel" | "wolf" | "wraith" | "crab" | "brine" | "raider" | "skiff";
 
 export const MOB: Record<
   MobKind,
@@ -343,9 +343,10 @@ export const MOB: Record<
   orc: { name: "Орк", hp: 16, atk: 4, xp: 14, gold: 10, sprite: 0 },
   skel: { name: "Скелет", hp: 18, atk: 5, xp: 16, gold: 8, sprite: 1 },
   wraith: { name: "Призрак", hp: 28, atk: 7, xp: 40, gold: 30, sprite: 3 },
-  crab: { name: "Панцирник", hp: 14, atk: 4, xp: 12, gold: 6, sprite: 0 },
+  crab: { name: "Панцирник", hp: 28, atk: 4, xp: 12, gold: 6, sprite: 0 },
   brine: { name: "Солевой хранитель", hp: 180, atk: 12, xp: 120, gold: 80, sprite: 0 },
   raider: { name: "Морской налётчик", hp: 24, atk: 6, xp: 20, gold: 12, sprite: 0 },
+  skiff: { name: "Шлюп налётчиков", hp: 44, atk: 6, xp: 24, gold: 14, sprite: 0 },
 };
 
 export const SHOP: { word: string; npc: NpcId; item: ItemId; gold: number }[] = [
@@ -404,6 +405,7 @@ export const DROP: Record<MobKind, ItemId | null> = {
   crab: "shell",
   brine: "stormheart",
   raider: "ore",
+  skiff: null,
 };
 
 export const KEY_RU: Record<string, string> = {
