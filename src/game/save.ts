@@ -8,6 +8,7 @@ export const SAVE_KEY = "oathbound.save.v1";
 export const SAVE_VERSION = 1;
 
 export type SavedMode = "play" | "talent" | "dead" | "win";
+export type SavedTransport = "foot" | "boat" | "horse" | "bird" | "dragon";
 
 export type SavedMob = {
   id: number;
@@ -23,6 +24,7 @@ export type SavedMob = {
   poison: number;
   atkCd: number;
   flash: number;
+  guard?: number;
 };
 
 export type SavedRaid = {
@@ -57,6 +59,8 @@ export type GameSave = {
   version: typeof SAVE_VERSION;
   updatedAt: number;
   worldTime?: number;
+  transport?: SavedTransport;
+  transportAngle?: number;
   raid?: SavedRaid;
   keepDefense?: SavedKeepDefense;
   mode: SavedMode;
@@ -99,9 +103,10 @@ export type GameSave = {
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const HERO_IDS = new Set(["aldric", "vessa", "kael"]);
-const MAP_IDS = new Set(["shoal", "over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
+const MAP_IDS = new Set(["shoal", "strait", "over", "town", "hall", "inn", "dungeon", "crypt", "keep", "ship", "isle", "grotto"]);
 const MODES = new Set(["play", "talent", "dead", "win"]);
-const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine", "raider"]);
+const MOB_KINDS = new Set(["orc", "skel", "wolf", "wraith", "crab", "brine", "raider", "skiff"]);
+const TRANSPORTS = new Set(["foot", "boat", "horse", "bird", "dragon"]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -137,7 +142,8 @@ function validMob(value: unknown) {
     MAP_IDS.has(value.map) &&
     typeof value.kind === "string" &&
     MOB_KINDS.has(value.kind) &&
-    [value.x, value.y, value.hp, value.max, value.wait, value.stun, value.slow, value.poison, value.atkCd, value.flash].every(finite)
+    [value.x, value.y, value.hp, value.max, value.wait, value.stun, value.slow, value.poison, value.atkCd, value.flash].every(finite) &&
+    (value.guard === undefined || finite(value.guard))
   );
 }
 
@@ -176,6 +182,8 @@ export function decodeGameSave(raw: string | null): GameSave | null {
     if (!record(value)) return null;
     if (value.version !== SAVE_VERSION || !finite(value.updatedAt)) return null;
     if (value.worldTime !== undefined && !finite(value.worldTime)) return null;
+    if (value.transport !== undefined && (typeof value.transport !== "string" || !TRANSPORTS.has(value.transport))) return null;
+    if (value.transportAngle !== undefined && !finite(value.transportAngle)) return null;
     if (value.raid !== undefined && !validRaid(value.raid)) return null;
     if (value.keepDefense !== undefined && !validKeepDefense(value.keepDefense)) return null;
     if (typeof value.mode !== "string" || !MODES.has(value.mode)) return null;
