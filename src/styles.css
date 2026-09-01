@@ -1543,6 +1543,21 @@ img.talk-face {
   backdrop-filter: blur(10px);
 }
 
+.camp-hud {
+  border: 1px solid rgb(225 169 91 / 0.5);
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(circle at 12% 50%, rgb(202 92 52 / 0.22), transparent 8rem),
+    linear-gradient(110deg, rgb(35 23 23 / 0.95), rgb(8 14 25 / 0.96));
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.5), 0 0 28px rgb(218 119 64 / 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.camp-health {
+  background: linear-gradient(90deg, #b85f3f, #f2c36f);
+  box-shadow: 0 0 12px rgb(242 195 111 / 0.38);
+}
+
 .fortress-health {
   background: linear-gradient(90deg, #9d613c, #edc676);
   box-shadow: 0 0 10px rgb(237 198 118 / 0.34);
@@ -1555,6 +1570,29 @@ img.talk-face {
   background:
     radial-gradient(circle at 8% 20%, rgb(203 119 66 / 0.14), transparent 12rem),
     linear-gradient(125deg, rgb(39 29 21 / 0.74), rgb(13 15 16 / 0.74));
+}
+
+.camp-card {
+  border-color: rgb(224 171 91 / 0.36);
+  background:
+    radial-gradient(circle at 8% 18%, rgb(213 104 53 / 0.18), transparent 13rem),
+    radial-gradient(circle at 92% 12%, rgb(75 111 153 / 0.12), transparent 16rem),
+    linear-gradient(125deg, rgb(40 27 22 / 0.82), rgb(10 16 23 / 0.82));
+}
+
+.camp-card.is-broken {
+  border-color: rgb(178 82 73 / 0.42);
+  filter: saturate(0.7);
+}
+
+.camp-seal {
+  color: #f0b361;
+  box-shadow: inset 0 0 18px rgb(210 103 54 / 0.14), 0 0 20px rgb(210 103 54 / 0.08);
+}
+
+.camp-wall i {
+  background: linear-gradient(90deg, #ae5742, #f1bd68);
+  box-shadow: 0 0 12px rgb(241 189 104 / 0.2);
 }
 
 .fortress-card-head {
