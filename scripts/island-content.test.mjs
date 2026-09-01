@@ -65,6 +65,23 @@ test("starter shoal teaches gathering, gold, gear and boat construction", () => 
   assert.ok(MOB.crab.hp >= 28, "the tutorial crab must survive long enough to teach its telegraph");
 });
 
+test("starter island lore is discoverable and backed by original art", async () => {
+  const finds = source.loreFinds.filter((find) => find.map === "shoal");
+  assert.ok(finds.length >= 5);
+  assert.equal(new Set(finds.map((find) => find.id)).size, finds.length);
+  for (const find of finds) {
+    assert.equal(blocked("shoal", find.c, find.r), false, `${find.id} must stand on open ground`);
+    assert.equal(reachable("shoal", SPAWN.shoal, find), true, `${find.id} must be reachable`);
+    assert.ok(find.title.length >= 8);
+    assert.ok(find.text.length >= 80, `${find.id} needs a meaningful environmental story`);
+    assert.ok(find.frame >= 0 && find.frame <= 4);
+  }
+  const islandArt = await readFile(new URL("../public/sprites/island-life-v2.png", import.meta.url));
+  const seaArt = await readFile(new URL("../public/sprites/sea-combat-v2.png", import.meta.url));
+  assert.ok(islandArt.byteLength > 100_000);
+  assert.ok(seaArt.byteLength > 100_000);
+});
+
 test("the maiden voyage has a steerable sea corridor and worthy ships", () => {
   assert.ok(MAPS.strait.length >= 20);
   assert.ok(MAPS.strait[0].length >= 40);

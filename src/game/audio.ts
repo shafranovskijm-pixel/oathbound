@@ -1,3 +1,5 @@
+export type AmbienceKind = "shore" | "sea" | "storm" | "tavern" | "fire" | "dungeon" | "none";
+
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -5,7 +7,8 @@ export class GameAudio {
   private music: GainNode | null = null;
   private drone: OscillatorNode | null = null;
   private ambSrc: AudioBufferSourceNode | null = null;
-  private ambKind = "";
+  private ambKind: AmbienceKind = "none";
+  private ambBuffers = new Map<AmbienceKind, AudioBuffer>();
   muted = false;
 
   unlock() {
@@ -17,8 +20,8 @@ export class GameAudio {
       this.master = this.ctx.createGain();
       this.sfx = this.ctx.createGain();
       this.music = this.ctx.createGain();
-      this.sfx.gain.value = 0.4;
-      this.music.gain.value = 0.07;
+      this.sfx.gain.value = 0.46;
+      this.music.gain.value = 0.052;
       this.sfx.connect(this.master);
       this.music.connect(this.master);
       this.master.connect(this.ctx.destination);
@@ -31,21 +34,28 @@ export class GameAudio {
     if (!this.ctx || !this.music || this.drone) return;
     const o1 = this.ctx.createOscillator();
     const o2 = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
     const g = this.ctx.createGain();
     o1.type = "sine";
     o2.type = "triangle";
-    o1.frequency.value = 73;
-    o2.frequency.value = 110;
-    g.gain.value = 0.45;
+    o1.frequency.value = 55;
+    o2.frequency.value = 82.5;
+    lfo.frequency.value = 0.075;
+    lfoGain.gain.value = 0.08;
+    g.gain.value = 0.34;
+    lfo.connect(lfoGain);
+    lfoGain.connect(g.gain);
     o1.connect(g);
     o2.connect(g);
     g.connect(this.music);
     o1.start();
     o2.start();
+    lfo.start();
     this.drone = o1;
   }
 
-  setAmbience(kind: "fire" | "sea" | "none") {
+  setAmbience(kind: AmbienceKind) {
     if (!this.ctx || !this.music) return;
     if (kind === this.ambKind) return;
     this.ambKind = kind;
@@ -54,42 +64,102 @@ export class GameAudio {
     } catch {
       /* already stopped */
     }
+    this.ambSrc?.disconnect();
     this.ambSrc = null;
-    if (kind === "none" || this.muted) return;
+    if (kind === "none") return;
+
     const rate = this.ctx.sampleRate;
-    const buf = this.ctx.createBuffer(1, rate * 3, rate);
-    const data = buf.getChannelData(0);
-    let v = 0;
-    for (let i = 0; i < data.length; i++) {
-      const white = Math.random() * 2 - 1;
-      v = kind === "fire" ? v * 0.985 + white * 0.015 : v * 0.97 + white * 0.03;
-      let s = v;
-      if (kind === "fire") {
-        if (Math.random() < 0.0018) s += (Math.random() * 2 - 0.4) * 0.55;
-        if (Math.random() < 0.0004) s += Math.random() * 0.9;
-        s += Math.sin(i / 420) * 0.03;
-      } else {
-        s += Math.sin(i / 900) * 0.04;
+    const length = rate * 4;
+    let buf = this.ambBuffers.get(kind);
+    if (!buf) {
+      buf = this.ctx.createBuffer(2, length, rate);
+      for (let channel = 0; channel < 2; channel++) {
+        const data = buf.getChannelData(channel);
+        let low = 0;
+        let slow = 0;
+        for (let i = 0; i < data.length; i++) {
+          const white = Math.random() * 2 - 1;
+          const phase = i / rate;
+          low = low * 0.975 + white * 0.025;
+          slow = slow * 0.998 + white * 0.002;
+          const wave = Math.sin(phase * Math.PI * 2 * (kind === "storm" ? 0.16 : 0.1) + channel * 0.7);
+          let sample = low;
+          if (kind === "fire" || kind === "tavern") {
+            sample = white * 0.13 + low * 0.24;
+            if (Math.random() < 0.0015) sample += Math.random() * 0.9;
+          } else if (kind === "dungeon") {
+            sample = slow * 1.7 + Math.sin(phase * 47 + channel) * 0.035;
+          } else {
+            const swell = 0.32 + (wave + 1) * (kind === "storm" ? 0.42 : 0.22);
+            sample = low * swell + slow * 0.7;
+            if (kind === "shore") sample += Math.sin(phase * 17 + channel * 2.1) * 0.025;
+          }
+          data[i] = Math.max(-1, Math.min(1, sample));
+        }
       }
-      data[i] = s;
+      this.ambBuffers.set(kind, buf);
     }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     src.loop = true;
-    const f = this.ctx.createBiquadFilter();
-    f.type = kind === "fire" ? "highpass" : "lowpass";
-    f.frequency.value = kind === "fire" ? 180 : 420;
-    const g = this.ctx.createGain();
-    g.gain.value = kind === "fire" ? 0.28 : 0.18;
-    src.connect(f);
-    f.connect(g);
-    g.connect(this.music);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = kind === "fire" || kind === "tavern" ? "highpass" : "lowpass";
+    filter.frequency.value = kind === "fire" ? 260 : kind === "tavern" ? 180 : kind === "storm" ? 620 : kind === "dungeon" ? 210 : 470;
+    const gain = this.ctx.createGain();
+    gain.gain.value = kind === "storm" ? 0.24 : kind === "fire" ? 0.22 : kind === "tavern" ? 0.12 : kind === "dungeon" ? 0.14 : 0.16;
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.music);
     src.start();
     this.ambSrc = src;
   }
 
+  private noiseBurst(duration: number, gainValue: number, frequency: number, highpass = false) {
+    if (!this.ctx || !this.sfx || this.muted) return;
+    const frames = Math.max(1, Math.floor(this.ctx.sampleRate * duration));
+    const buffer = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const source = this.ctx.createBufferSource();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    filter.type = highpass ? "highpass" : "lowpass";
+    filter.frequency.value = frequency;
+    gain.gain.setValueAtTime(gainValue, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfx);
+    source.start();
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }
+
+  private chord(freqs: number[], duration: number, gain: number) {
+    freqs.forEach((frequency, index) => this.tone(frequency, duration + index * 0.08, "sine", gain / Math.max(1, freqs.length), frequency * 1.06));
+  }
+
   crackle() {
-    this.tone(90 + Math.random() * 80, 0.08, "sawtooth", 0.04, 40);
+    this.noiseBurst(0.055, 0.045, 1350, true);
+  }
+
+  ambientDetail() {
+    if (this.ambKind === "shore") {
+      this.tone(980, 0.15, "sine", 0.018, 760);
+      this.tone(1220, 0.12, "sine", 0.012, 940);
+    } else if (this.ambKind === "sea") {
+      this.tone(330, 0.38, "sine", 0.018, 260);
+    } else if (this.ambKind === "storm") {
+      this.noiseBurst(0.65, 0.07, 180);
+    } else if (this.ambKind === "tavern") {
+      this.chord([196, 246.9, 293.7], 0.55, 0.035);
+    } else if (this.ambKind === "dungeon") {
+      this.tone(124, 0.8, "sine", 0.024, 88);
+    }
   }
 
   resume() {
@@ -124,7 +194,7 @@ export class GameAudio {
   }
 
   step() {
-    this.tone(150 + Math.random() * 40, 0.04, "sine", 0.025);
+    this.tone(145 + Math.random() * 35, 0.035, "sine", 0.018);
   }
   pickup() {
     this.tone(520, 0.12, "sine", 0.09, 820);
@@ -134,6 +204,28 @@ export class GameAudio {
   }
   hit() {
     this.tone(90, 0.11, "sawtooth", 0.11, 48);
+  }
+  shellCrack() {
+    this.noiseBurst(0.17, 0.14, 920, true);
+    this.tone(78, 0.14, "sawtooth", 0.07, 48);
+  }
+  cannon() {
+    this.noiseBurst(0.24, 0.18, 680);
+    this.tone(64, 0.25, "sawtooth", 0.12, 40);
+  }
+  sail() {
+    this.noiseBurst(0.18, 0.06, 1150, true);
+  }
+  boatLaunch() {
+    this.noiseBurst(0.65, 0.09, 480);
+    this.chord([110, 164.8, 220], 0.65, 0.055);
+  }
+  lore() {
+    this.chord([220, 277.2, 329.6], 0.78, 0.09);
+  }
+  bell() {
+    this.tone(740, 0.65, "sine", 0.065, 700);
+    this.tone(1110, 0.52, "sine", 0.032, 980);
   }
   spell() {
     this.tone(640, 0.16, "square", 0.06, 220);

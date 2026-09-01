@@ -44,6 +44,16 @@ export type Site = {
 
 export type Landmark = { id: string; name: string; c: number; r: number };
 
+export type LoreFind = {
+  id: string;
+  map: MapId;
+  c: number;
+  r: number;
+  frame: number;
+  title: string;
+  text: string;
+};
+
 export type GatherNode = {
   id: string;
   map: MapId;
@@ -56,6 +66,7 @@ export type GatherNode = {
 };
 
 export const LANDMARKS: Landmark[] = raw.landmarks;
+export const LORE_FINDS: LoreFind[] = raw.loreFinds as LoreFind[];
 export const SITES: Site[] = raw.sites as Site[];
 export const GATHER_NODES: GatherNode[] = raw.gatherNodes as GatherNode[];
 export const DATA_CRAFT: { out: ItemId; gold: number; need: ItemId[] }[] = raw.craft as {
@@ -70,4 +81,8 @@ export function siteAt(map: MapId, c: number, r: number, dist = 2) {
 
 export function gatherNodeAt(map: MapId, c: number, r: number, dist = 1) {
   return GATHER_NODES.find((node) => node.map === map && Math.abs(node.c - c) + Math.abs(node.r - r) <= dist) ?? null;
+}
+
+export function loreFindAt(map: MapId, c: number, r: number, dist = 1) {
+  return LORE_FINDS.find((find) => find.map === map && Math.abs(find.c - c) + Math.abs(find.r - r) <= dist) ?? null;
 }

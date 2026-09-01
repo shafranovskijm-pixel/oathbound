@@ -9,7 +9,7 @@ import {
   type TalentId,
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
-import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, SITES, gatherNodeAt, siteAt, type SiteId } from "./data";
+import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, LORE_FINDS, SITES, gatherNodeAt, loreFindAt, siteAt, type SiteId } from "./data";
 import { readGameSave, writeGameSave, type GameSave, type SavedKeepDefense, type SavedMode, type SavedRaid, type SavedTransport } from "./save";
 import {
   EXITS,
@@ -224,6 +224,10 @@ const SHOAL_WRECK = { c: 4, r: 14 };
 const SHOAL_BOAT = { c: 23, r: 13 };
 const SHOAL_BAR = { c: 19, r: 7 };
 const SHOAL_BOAT_NEEDS: ItemId[] = ["wood", "wood", "wood", "wood", "cloth", "cloth", "ore"];
+const STRAIT_REEFS = [[13, 4], [20, 16], [29, 6], [38, 15]] as const;
+const STRAIT_WRECK = { c: 10, r: 18 };
+const STRAIT_VORTEX = { c: 27, r: 12 };
+const STRAIT_DRAGON = { c: 42, r: 6 };
 
 const SITE_VISUAL: Record<SiteId, number> = {
   grove: 0,
@@ -530,7 +534,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -893,6 +897,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return [
       { text: "Обыскать разбитый сундук и одеться", done: opened.has("shoal-wreck") },
       { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
+      { text: `Услышать голоса острова (${Math.min(3, loreCount())}/3)`, done: loreCount() >= 3 },
       { text: "Собрать лодку: 4 дерева · 2 полотна · 1 руда", done: flags.has("raftBuilt") },
       { text: transport === "boat" || map === "strait" ? "Провести лодку через пролив и отбиться от шлюпов" : "Спустить лодку и встать за штурвал", done: flags.has("leftShoal") },
       { text: "Найти Халрика в зале Вестмера", done: flags.has("metLord") },
@@ -1975,6 +1980,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       spawnGroundItem("chain", m.x + 8, m.y);
       say("Редкая добыча: Кольчуга.");
     }
+    if (m.kind === "skiff") {
+      say("Вражеский парус ушёл под воду. В проливе стало на один долг тише.");
+      audio.bell();
+    }
     if (mods.siphon) mp = Math.min(maxMp, mp + mods.siphon);
     checkLevel();
     audio.ok();
@@ -1989,6 +1998,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       float(m.x, m.y - 23, "ПАНЦИРЬ ТРЕСНУЛ", "#f0d58a");
       burst(m.x, m.y, "#e8c070", 18);
       addMagic("wave", m.x, m.y, "#e8c070", 28, 0.4, ang);
+      audio.shellCrack();
       if (m.map === "shoal" && !flags.has("crabLesson")) {
         flags.add("crabLesson");
         say("Панцирь принял первый удар. Следи за красным кругом и уходи на Shift, когда клешня занесена.");
@@ -2097,7 +2107,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         z: 10,
         grav: 0,
         life: 1.45,
-        dmg: 8 + Math.floor(level / 2),
+        dmg: 8 + Math.floor(level / 2) + (flags.has("saltWhisper") ? 2 : 0),
         r: 4,
         color: "#f0d58a",
         kind: "arrow",
@@ -2105,7 +2115,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       addSlash(px, py, ang, 34, "#f0d58a", "arc", 0.18);
       burst(px + Math.cos(ang) * 24, py + Math.sin(ang) * 24, "#f0d58a", 7);
       shake = 0.08;
-      audio.hit();
+      audio.cannon();
       return;
     }
     meleeCd = heroId === "vessa" ? 0.42 : heroId === "kael" ? 0.32 : 0.38;
@@ -2138,6 +2148,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (transport === "boat") {
       addMagic("wave", px, py, "#b9eee4", 31, 0.38, Math.atan2(dodgeDy, dodgeDx));
       say("Резкий поворот. Таран прошёл мимо.");
+      audio.sail();
     } else {
       addMagic("afterimage", px, py, "#d8e8df", 24, 0.34, Math.atan2(dodgeDy, dodgeDx), dir);
     }
@@ -2343,7 +2354,51 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     moveTo = null;
     say("Ты столкнул лодку в прибой и взял румпель. WASD — штурвал, ЛКМ — палубный гарпун, Shift — резкий манёвр. Иди на восток.");
     burst(px, py, "#b9eee4", 28);
-    audio.ok();
+    audio.boatLaunch();
+    emit(true);
+    return true;
+  }
+
+  function loreCount() {
+    return LORE_FINDS.filter((find) => opened.has(`lore:${find.id}`)).length;
+  }
+
+  function handleLoreFind() {
+    const find = loreFindAt(map, tileC(), tileR(), 1);
+    if (!find) return false;
+    const key = `lore:${find.id}`;
+    if (opened.has(key)) {
+      say(`${find.title}. ${find.text}`);
+      emit(true);
+      return true;
+    }
+    opened.add(key);
+    say(`${find.title}. ${find.text}`);
+    burst(find.c * TILE + 16, find.r * TILE + 16, "#9ed8d0", 20);
+    audio.lore();
+    if (loreCount() === 3 && !flags.has("saltWhisper")) {
+      flags.add("saltWhisper");
+      maxMp += 2;
+      mp = maxMp;
+      say("Три голоса сложились в одну фразу: «Мор прятал дорогу не к сокровищу, а от него». +2 маны и +2 к урону палубного гарпуна.");
+      addMagic("sigil", px, py, "#9ed8d0", 42, 0.9);
+    }
+    emit(true);
+    return true;
+  }
+
+  function handleSeaFeature() {
+    if (map !== "strait") return false;
+    const wreckDistance = Math.hypot(STRAIT_WRECK.c * TILE + 16 - px, STRAIT_WRECK.r * TILE + 16 - py);
+    if (wreckDistance > 54) return false;
+    if (!opened.has("strait-wreck")) {
+      opened.add("strait-wreck");
+      spawnLoot(px, py, 6);
+      spawnGroundItem("cloth", px + 10, py, "strait");
+      say("Остов «Тихой Марты». В журнале одна строка: «Не доверяй спокойной воде у чёрного глаза». Подними парусину и монеты.");
+      burst(px, py, "#b9eee4", 24);
+      audio.bell();
+    } else say("Остов уже пуст. Колокол под водой всё ещё отвечает ветру.");
     emit(true);
     return true;
   }
@@ -2361,6 +2416,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       return;
     }
     if (handleShoalBoat()) return;
+    if (handleLoreFind()) return;
+    if (handleSeaFeature()) return;
     const plot = siteAt(map, tileC(), tileR());
     if (plot) {
       const pick = raised.get(plot.id);
@@ -2769,9 +2826,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (map === "keep" && built.has("hearth")) {
       audio.setAmbience("fire");
       if (Math.random() < dt * 2.2) audio.crackle();
-    } else if (map === "shoal" || map === "strait" || map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
+    } else if (map === "inn" || (map === "shoal" && Math.hypot(SHOAL_BAR.c * TILE + 16 - px, SHOAL_BAR.r * TILE + 16 - py) < 104)) {
+      audio.setAmbience("tavern");
+    } else if (map === "dungeon" || map === "crypt" || map === "grotto") {
+      audio.setAmbience("dungeon");
+    } else if (map === "strait") {
+      audio.setAmbience("storm");
+    } else if (map === "shoal") {
+      audio.setAmbience("shore");
+    } else if (map === "ship" || map === "isle" || tileAt(map, tileC(), tileR()) === "~" || tileAt(map, tileC(), tileR()) === ",") {
       audio.setAmbience("sea");
     } else audio.setAmbience("none");
+    if (Math.random() < dt * 0.035) audio.ambientDetail();
     for (const k of Object.keys(cds)) cds[k] = Math.max(0, cds[k] - dt);
 
     let mx = 0;
@@ -2831,6 +2897,31 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const ny = py + vy * dt + (lunge > 0 ? ly * 90 * dt : 0) + (dodging ? dodgeDy * dodgeSpeed * dt : 0);
     if (tryPos(nx, py)) px = nx;
     if (tryPos(px, ny)) py = ny;
+    if (map === "strait" && transport === "boat") {
+      const vortexX = STRAIT_VORTEX.c * TILE + 16;
+      const vortexY = STRAIT_VORTEX.r * TILE + 16;
+      const dx = vortexX - px;
+      const dy = vortexY - py;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      if (distance < 132) {
+        const pull = (1 - distance / 132) * 82 * dt;
+        const pulledX = px + (dx / distance) * pull;
+        const pulledY = py + (dy / distance) * pull;
+        if (tryPos(pulledX, py)) px = pulledX;
+        if (tryPos(px, pulledY)) py = pulledY;
+        if (!flags.has("vortexSeen")) {
+          flags.add("vortexSeen");
+          say("Чёрный глаз тянет лодку боком. Держи ход поперёк течения или уходи на Shift.");
+          audio.sail();
+        }
+      }
+      const dragonDistance = Math.hypot(STRAIT_DRAGON.c * TILE + 16 - px, STRAIT_DRAGON.r * TILE + 16 - py);
+      if (dragonDistance < 190 && !flags.has("dragonShadow")) {
+        flags.add("dragonShadow");
+        say("Над парусом проходит крылатая тень размером с остров. Когда-нибудь тебе понадобится не корабль.");
+        audio.lore();
+      }
+    }
     const size = MAP_SIZE[map];
     px = Math.max(20, Math.min(size.cols * TILE - 20, px));
     py = Math.max(20, Math.min(size.rows * TILE - 20, py));
@@ -2937,19 +3028,26 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const nearbyDrop = nearestGroundItem(78);
     const node = gatherNodeAt(map, tileC(), tileR(), 2);
     const gather = node && !opened.has(`node:${node.id}`) ? node : null;
+    const lore = loreFindAt(map, tileC(), tileR(), 2);
+    const unreadLore = lore && !opened.has(`lore:${lore.id}`) ? lore : null;
+    const nearSeaWreck = map === "strait" && Math.hypot(STRAIT_WRECK.c * TILE + 16 - px, STRAIT_WRECK.r * TILE + 16 - py) < 78;
     const plot = siteAt(map, tileC(), tileR());
-    hint = transport === "boat"
-      ? journeyHint()
-      : nearbyDrop
+    hint = nearbyDrop
       ? `E / клик — поднять: ${ITEM[nearbyDrop.item].name}`
       : n
       ? `E / клик — поговорить: ${n.name}`
+      : unreadLore
+        ? `E / клик — осмотреть: ${unreadLore.title}`
+        : nearSeaWreck
+          ? "E / клик — обыскать затонувший остов"
       : gather
         ? `E / ЛКМ — ${gather.label}`
         : plot
         ? raised.has(plot.id)
           ? `E — ${plot.name}: ${raised.get(plot.id)}`
           : `E — участок: ${plot.name}. Выбери постройку`
+        : transport === "boat"
+          ? journeyHint()
         : map === "keep"
           ? "E / ЛКМ — строить · кузница шьёт плащи"
           : map === "ship"
@@ -2961,7 +3059,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
                 : map === "isle"
                   ? journeyHint()
                   : map === "grotto"
-                    ? journeyHint()
+                  ? journeyHint()
                   : "Кликни по подсвеченному объекту, чтобы подойти и взаимодействовать.";
     for (const w of WAYPOINTS) {
       if (w.map !== map || stones.has(w.id)) continue;
@@ -3446,7 +3544,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     ctx.filter = enemy
       ? "hue-rotate(150deg) saturate(1.65) brightness(0.76) drop-shadow(0 7px 5px rgba(0,0,0,.55))"
       : "drop-shadow(0 7px 5px rgba(0,0,0,.55))";
-    sheetGrid(imgs["prologue-world"], 4, 3, 2, -size / 2, -size / 2, size);
+    sheetGrid(imgs["sea-combat-v2"], enemy ? 1 : 0, 3, 2, -size / 2, -size / 2, size);
     ctx.restore();
   }
 
@@ -3668,7 +3766,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (let r = r0; r < r1; r++) {
       for (let c = c0; c < c1; c++) {
         const s = wrld(c * TILE, r * TILE);
-        blit(cellImg(grid[r][c], map), s.x, s.y, TILE, TILE);
+        const tile = map === "strait" && grid[r][c] === "M" ? "~" : grid[r][c];
+        blit(cellImg(tile, map), s.x, s.y, TILE, TILE);
+        if ((map === "shoal" || map === "strait") && tile === "~" && (c * 13 + r * 17) % 11 === 0) {
+          ctx.strokeStyle = `rgba(205,235,226,${map === "strait" ? 0.18 : 0.12})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          const drift = (time * (map === "strait" ? 18 : 11) + c * 5 + r * 3) % 20;
+          ctx.moveTo(s.x + drift, s.y + 9);
+          ctx.quadraticCurveTo(s.x + 15, s.y + 5, s.x + 27, s.y + 10);
+          ctx.stroke();
+        }
         if (map === "isle" && grid[r][c] === ",") {
           ctx.fillStyle = `rgba(38,92,104,${0.04 + tide.level * 0.3})`;
           ctx.fillRect(s.x, s.y, TILE, TILE);
@@ -3713,6 +3821,22 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       ctx.restore();
     }
+    if (map === "strait") {
+      ctx.fillStyle = "rgba(14,29,43,0.18)";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.save();
+      ctx.strokeStyle = "rgba(210,231,230,0.16)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 18; i++) {
+        const x = (i * 89 + time * 190) % (cssW + 100) - 50;
+        const y = (i * 127 + time * 75) % (cssH + 80) - 40;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 17, y + 31);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     if (map === "grotto") {
       ctx.fillStyle = "rgba(20,68,72,0.12)";
       ctx.fillRect(0, 0, cssW, cssH);
@@ -3737,6 +3861,53 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           true,
         );
       }
+
+      for (const find of LORE_FINDS) {
+        if (find.map !== "shoal") continue;
+        const propSize = find.frame === 0 ? 94 : find.frame === 4 ? 88 : 78;
+        const prop = wrld(find.c * TILE + 16 - propSize / 2, find.r * TILE + 12 - propSize * 0.72);
+        ctx.save();
+        if (opened.has(`lore:${find.id}`)) ctx.globalAlpha = 0.82;
+        sheetGrid(imgs["island-life-v2"], find.frame, 3, 2, prop.x, prop.y, propSize);
+        ctx.restore();
+        if (!opened.has(`lore:${find.id}`)) drawWorldPrompt(find.c * TILE + 16, find.r * TILE + 2, `Осмотреть · ${find.title}`, true);
+        if (find.frame === 1) {
+          const fire = wrld(find.c * TILE + 16, find.r * TILE + 8);
+          const glow = ctx.createRadialGradient(fire.x, fire.y, 2, fire.x, fire.y, 54);
+          glow.addColorStop(0, "rgba(239,147,76,0.28)");
+          glow.addColorStop(1, "rgba(239,147,76,0)");
+          ctx.fillStyle = glow;
+          ctx.fillRect(fire.x - 54, fire.y - 54, 108, 108);
+        }
+      }
+      const buoy = wrld(25 * TILE - 23, 15 * TILE - 47);
+      sheetGrid(imgs["island-life-v2"], 5, 3, 2, buoy.x, buoy.y, 72);
+    }
+
+    if (map === "strait") {
+      for (const [c, r] of STRAIT_REEFS) {
+        const reef = wrld(c * TILE - 35, r * TILE - 50);
+        sheetGrid(imgs["sea-combat-v2"], 2, 3, 2, reef.x, reef.y, 102);
+      }
+      const wreck = wrld(STRAIT_WRECK.c * TILE - 32, STRAIT_WRECK.r * TILE - 48);
+      sheetGrid(imgs["sea-combat-v2"], 3, 3, 2, wreck.x, wreck.y, 96);
+      if (!opened.has("strait-wreck")) drawWorldPrompt(STRAIT_WRECK.c * TILE + 16, STRAIT_WRECK.r * TILE + 2, "Обыскать остов", true);
+
+      const vortex = wrld(STRAIT_VORTEX.c * TILE + 16, STRAIT_VORTEX.r * TILE + 16);
+      ctx.save();
+      ctx.translate(vortex.x, vortex.y);
+      ctx.rotate(time * 0.16);
+      ctx.globalAlpha = 0.76 + Math.sin(time * 2) * 0.08;
+      sheetGrid(imgs["sea-combat-v2"], 4, 3, 2, -62, -62, 124);
+      ctx.restore();
+
+      const dragon = wrld(STRAIT_DRAGON.c * TILE + 16, STRAIT_DRAGON.r * TILE + 16);
+      ctx.save();
+      ctx.translate(dragon.x, dragon.y);
+      ctx.rotate(-0.18 + Math.sin(time * 0.35) * 0.05);
+      ctx.globalAlpha = flags.has("dragonShadow") ? 0.42 : 0.24;
+      sheetGrid(imgs["sea-combat-v2"], 5, 3, 2, -92, -72, 184);
+      ctx.restore();
     }
 
     if ((map === "hall" && !opened.has("hall:10,3")) || (map === "inn" && !opened.has("inn:3,4")) || (map === "dungeon" && !opened.has("dungeon:3,3"))) {
@@ -4542,6 +4713,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (const node of GATHER_NODES) {
       if (node.map === map && !opened.has(`node:${node.id}`)) consider(node.c, node.r, 32);
     }
+    for (const find of LORE_FINDS) {
+      if (find.map === map && !opened.has(`lore:${find.id}`)) consider(find.c, find.r, 42);
+    }
     for (const site of SITES) {
       if (site.map === map) consider(site.c, site.r, 44);
     }
@@ -4559,6 +4733,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (!opened.has("shoal-wreck")) consider(SHOAL_WRECK.c, SHOAL_WRECK.r, 44);
       consider(SHOAL_BOAT.c, SHOAL_BOAT.r, 52);
     }
+    if (map === "strait" && !opened.has("strait-wreck")) consider(STRAIT_WRECK.c, STRAIT_WRECK.r, 48);
     return candidates.reduce<(typeof candidates)[number] | null>((best, candidate) => (!best || candidate.d < best.d ? candidate : best), null);
   }
 

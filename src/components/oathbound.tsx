@@ -259,9 +259,9 @@ function MobPortrait({ kind }: { kind: NonNullable<Snapshot["target"]>["kind"] }
       <span
         className="target-portrait"
         style={{
-          backgroundImage: "url(/sprites/prologue-world.png)",
+          backgroundImage: "url(/sprites/sea-combat-v2.png)",
           backgroundSize: "300% 200%",
-          backgroundPosition: "50% 100%",
+          backgroundPosition: "50% 0%",
         }}
         aria-hidden
       />
@@ -816,11 +816,12 @@ export function Oathbound() {
             />
             <div className="talk-body">
               <p className="font-mono text-xs tracking-widest text-muted">{snap.talk.role}</p>
-              <p className="font-display text-3xl md:text-4xl leading-none mt-1">{snap.talk.name}</p>
+              <p className="font-display text-2xl md:text-3xl leading-none mt-1">{snap.talk.name}</p>
               {snap.talk.ask ? (
                 <p className="talk-you mt-3">ты — {snap.talk.ask}</p>
               ) : null}
               <p className="talk-line mt-3">{snap.talk.text}</p>
+              <div className="talk-rule" aria-hidden="true" />
               <ol className="talk-list mt-4">
                 {snap.talk.keys.map((k, i) => (
                   <li key={k.id}>
@@ -832,7 +833,7 @@ export function Oathbound() {
                 ))}
               </ol>
               <button type="button" className="talk-leave" onClick={() => g.current?.closePanel()}>
-                Уйти
+                Закончить разговор · Esc
               </button>
             </div>
           </div>
