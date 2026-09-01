@@ -162,6 +162,9 @@ type Mob = {
   poison: number;
   atkCd: number;
   flash: number;
+  windup: number;
+  windupMax: number;
+  attackTarget: "player" | "haven";
 };
 type Shot = {
   x: number;
@@ -181,11 +184,23 @@ type Shot = {
   poison: number;
   stuck: number;
   kind: "arrow" | "magic";
+  spell?: SpellId;
   hit: number;
 };
-type Slash = { x: number; y: number; ang: number; t: number; r: number; color: string };
+type Slash = { x: number; y: number; ang: number; t: number; max: number; r: number; color: string; style: "arc" | "ring" | "enemy" };
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
 type Floater = { x: number; y: number; text: string; life: number; color: string };
+type MagicFx = {
+  kind: "rune" | "wave" | "impact" | "afterimage" | "sigil";
+  x: number;
+  y: number;
+  life: number;
+  max: number;
+  r: number;
+  color: string;
+  ang: number;
+  face: number;
+};
 type Coin = { map: MapId; x: number; y: number; z: number; vx: number; vy: number; vz: number; n: number; wait: number; spin: number };
 type GroundItem = { id: number; map: MapId; x: number; y: number; z: number; vz: number; wait: number; item: ItemId };
 
@@ -249,6 +264,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let lunge = 0;
   let shieldT = 0;
   let markT = 0;
+  let gearFxT = 0;
   let iframe = 0;
   let lyraAtk = 0;
 
@@ -299,12 +315,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   const floaters: Floater[] = [];
   const shots: Shot[] = [];
   const slashes: Slash[] = [];
+  const magicFx: MagicFx[] = [];
   const coins: Coin[] = [];
   const groundItems: GroundItem[] = [];
   let goldFlash = 0;
   let activeSlot = 0;
   let moveTo: { x: number; y: number } | null = null;
   let huntId = 0;
+  let hoverMobId = 0;
   let talkGo: Npc | null = null;
   let interactGo: { x: number; y: number } | null = null;
   let holdLmb = false;
@@ -356,6 +374,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       poison: 0,
       atkCd: 0,
       flash: 0,
+      windup: 0,
+      windupMax: 0,
+      attackTarget: "player",
     };
   }
 
@@ -442,6 +463,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (slot && (!worn[slot] || autoEquip)) worn[slot] = id;
     if (slot && autoEquip) say(`Надето: ${ITEM[id].name}.`);
     if (AUTO_EQUIP_ITEMS.has(id)) {
+      gearFxT = 1.4;
       burst(px, py, "#e8e4d8", 18);
       float(px, py - 20, ITEM[id].name, "#e8e4d8");
     }
@@ -458,6 +480,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const slot = ITEM[id].slot;
     if (!slot || !has(id)) return;
     worn[slot] = id;
+    gearFxT = 1.4;
+    magicFx.push({ kind: "wave", x: px, y: py, life: 0.55, max: 0.55, r: 38, color: "#f0d58a", ang: 0, face: dir });
     say(`На тебе: ${ITEM[id].name}.`);
     audio.ok();
     emit(true);
@@ -929,7 +953,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     recalcKeep();
     for (const key of Object.keys(cds)) delete cds[key];
     Object.assign(cds, save.cds);
-    mobs = save.mobs.map((mob) => ({ ...mob }));
+    mobs = save.mobs.map((mob) => ({ ...mob, windup: 0, windupMax: 0, attackTarget: "player" as const }));
     mobId = Math.max(1, ...mobs.map((mob) => mob.id + 1));
     groundItems.length = 0;
     groundItems.push(
@@ -949,9 +973,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     floaters.length = 0;
     shots.length = 0;
     slashes.length = 0;
+    magicFx.length = 0;
     coins.length = 0;
     moveTo = null;
     huntId = 0;
+    hoverMobId = 0;
     talkGo = null;
     interactGo = null;
     talkNpc = null;
@@ -978,6 +1004,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       const s = 50 + Math.random() * 90;
       sparks.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.3 + Math.random() * 0.3, color, size: 2 + Math.random() * 2 });
     }
+  }
+  function addMagic(kind: MagicFx["kind"], x: number, y: number, color: string, r: number, life: number, ang = 0, face = dir) {
+    magicFx.push({ kind, x, y, color, r, life, max: life, ang, face });
+  }
+  function addSlash(x: number, y: number, ang: number, r: number, color: string, style: Slash["style"] = "arc", life = 0.2) {
+    slashes.push({ x, y, ang, r, color, style, t: life, max: life });
   }
   function float(x: number, y: number, text: string, color: string) {
     floaters.push({ x, y, text, life: 0.75, color });
@@ -1086,6 +1118,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     floaters.length = 0;
     shots.length = 0;
     slashes.length = 0;
+    magicFx.length = 0;
     coins.length = 0;
     groundItems.length = 0;
     groundItemId = 1;
@@ -1093,12 +1126,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     activeSlot = 0;
     moveTo = null;
     huntId = 0;
+    hoverMobId = 0;
     talkGo = null;
     interactGo = null;
     holdLmb = false;
     holdRmb = false;
     shieldT = 0;
     markT = 0;
+    gearFxT = 0;
     seedMobs();
     time = 0;
     tideCycle = 0;
@@ -1489,7 +1524,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     audio.ok();
   }
 
-  function hurtMob(m: Mob, dmg: number, kb = 0, ang = 0) {
+  function hurtMob(m: Mob, dmg: number, kb = 0, ang = 0, impactColor = "#e8dcc8") {
     if (m.hp <= 0) return;
     m.hp -= dmg;
     m.flash = 0.12;
@@ -1502,7 +1537,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         m.y = ny;
       }
     }
-    burst(m.x, m.y, "#e8dcc8", 5);
+    burst(m.x, m.y, impactColor, dmg >= 12 ? 10 : 6);
+    addMagic("impact", m.x, m.y - 4, impactColor, Math.min(24, 10 + dmg * 0.45), 0.24, ang);
     if (mods.lifesteal) hp = Math.min(maxHp, hp + mods.lifesteal);
     if (m.hp <= 0) killMob(m);
     else audio.hit();
@@ -1516,6 +1552,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     iframe = 0.45;
     shake = 0.2;
     float(px, py - 18, `-${d}`, "#c17a6a");
+    addMagic("impact", px, py - 4, shieldT > 0 ? "#9ec4e8" : "#e08a78", 18, 0.24, aim() + Math.PI);
+    burst(px, py, shieldT > 0 ? "#9ec4e8" : "#c17a6a", shieldT > 0 ? 8 : 12);
     audio.hurt();
     if (hp <= 0) {
       hp = 0;
@@ -1550,7 +1588,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function slashAt(x: number, y: number, ang: number, r: number, dmg: number, color: string, whirl = false) {
-    slashes.push({ x, y, ang, t: 0.18, r, color });
+    addSlash(x, y, ang, r, color, whirl ? "ring" : "arc", whirl ? 0.28 : 0.2);
     lunge = 0.12;
     shake = 0.1;
     audio.hit();
@@ -1564,7 +1602,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         const dot = (dx * Math.cos(ang) + dy * Math.sin(ang)) / (dist || 1);
         if (dot < 0.15) continue;
       }
-      hurtMob(m, dmg, 22, ang);
+      hurtMob(m, dmg, 22, ang, color);
       if (mods.stun) m.stun = Math.max(m.stun, 0.35 + mods.stun);
     }
   }
@@ -1611,6 +1649,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             ? 7 + Math.floor(maxMp / 6)
             : 6 + Math.floor(maxMp / 5) + (heroId === "kael" ? 3 : 0);
       const col = id === "frost" ? "#9ec4e8" : id === "smite" ? "#e8d48a" : id === "shot" ? "#c4b48a" : "#e07a4a";
+      addMagic("rune", px + fx * 10, py + fy * 10, col, id === "smite" ? 25 : 19, 0.32, ang);
+      burst(px + fx * 13, py + fy * 13, col, id === "shot" ? 4 : 8);
       const arrow = id === "shot";
       const dist = hasAim ? Math.hypot(aimX - px, aimY - py) : 140;
       const loft = arrow ? Math.min(90, 18 + dist * 0.12) : 0;
@@ -1632,12 +1672,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           r: id === "smite" ? 7 : arrow ? 3 : 5,
           life: id === "smite" ? 0.5 : arrow ? 1.4 : 0.95,
           kind: arrow ? "arrow" : "magic",
+          spell: id,
         });
       shoot(ang);
       if (id === "shot" && Math.random() < mods.twin) shoot(ang + 0.18);
     } else if (id === "nova") {
       const rad = 78 * mods.nova;
-      slashes.push({ x: px, y: py, ang: 0, t: 0.28, r: rad, color: "#e07a4a" });
+      addSlash(px, py, 0, rad, "#e07a4a", "ring", 0.42);
+      addMagic("wave", px, py, "#f0b06b", rad, 0.62);
+      addMagic("rune", px, py, "#e8d48a", Math.min(42, rad * 0.55), 0.5);
       shake = 0.18;
       for (const m of mobs) {
         if (m.map !== map || m.hp <= 0) continue;
@@ -1648,11 +1691,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       slashAt(px, py, ang, 58 * mods.slash, meleeDmg() + 4, "#e8e4d8", true);
     } else if (id === "guard") {
       shieldT = 2.4;
+      addMagic("wave", px, py, "#b9d8ff", 34, 0.48);
+      addMagic("rune", px, py, "#d8e8ff", 26, 0.55);
+      burst(px, py, "#b9d8ff", 12);
       say("Страж.");
     } else if (id === "dash") {
       const dist = 70 * mods.dash;
       iframe = 0.28;
       for (let i = 0; i < 8; i++) {
+        if (i % 2 === 0) addMagic("afterimage", px, py, "#b9d8ca", 24, 0.34, ang, dir);
         const nx = px + fx * (dist / 8);
         const ny = py + fy * (dist / 8);
         if (!tryPos(nx, ny)) break;
@@ -1662,6 +1709,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       slashAt(px, py, ang, 36, meleeDmg(), "#c8d0c4");
     } else if (id === "mark") {
       markT = 6;
+      addMagic("sigil", px, py, "#e8d48a", 28, 0.8, ang);
+      burst(px, py, "#e8d48a", 10);
       say("Метка на клинке.");
     }
     emit(true);
@@ -2116,6 +2165,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     lunge = Math.max(0, lunge - dt);
     shieldT = Math.max(0, shieldT - dt);
     markT = Math.max(0, markT - dt);
+    gearFxT = Math.max(0, gearFxT - dt);
     iframe = Math.max(0, iframe - dt);
     goldFlash = Math.max(0, goldFlash - dt * 1.8);
     if (map === "keep" && built.has("hearth")) {
@@ -2288,7 +2338,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         }
       }
       if (m.hp <= 0) continue;
-      if (m.stun > 0) continue;
+      if (m.stun > 0) {
+        m.windup = 0;
+        continue;
+      }
       const playerDist = Math.hypot(px - m.x, py - m.y);
       const attacksHaven = raid.active && m.kind === "raider" && playerDist >= 76;
       const targetX = attacksHaven ? 13 * TILE + 16 : px;
@@ -2303,6 +2356,44 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         burst(m.x, m.y, "#9ed8d0", 36);
         shake = 0.55;
       }
+
+      const reach = m.kind === "brine" ? 68 : attacksHaven ? 30 : 22;
+      if (m.windup > 0) {
+        m.windup = Math.max(0, m.windup - dt);
+        if (m.windup <= 0) {
+          const hitsHaven = m.attackTarget === "haven";
+          const hitX = hitsHaven ? 13 * TILE + 16 : px;
+          const hitY = hitsHaven ? 17 * TILE + 16 : py;
+          const hitDx = hitX - m.x;
+          const hitDy = hitY - m.y;
+          const hitDist = Math.hypot(hitDx, hitDy);
+          const hitReach = m.kind === "brine" ? 68 : hitsHaven ? 30 : 22;
+          const attackColor = m.kind === "brine" ? "#9ed8d0" : m.kind === "wraith" ? "#b89ad8" : m.kind === "crab" ? "#d8a06a" : "#d58a78";
+          m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : 0.85;
+          if (hitDist < hitReach + 18) {
+            addSlash(m.x, m.y, Math.atan2(hitDy, hitDx), m.kind === "brine" ? 62 : 34, attackColor, "enemy", 0.24);
+            burst(m.x + hitDx * 0.55, m.y + hitDy * 0.55, attackColor, m.kind === "brine" ? 22 : 8);
+            shake = Math.max(shake, m.kind === "brine" ? 0.28 : 0.14);
+            if (hitsHaven) {
+              raid.havenHp = Math.max(0, raid.havenHp - MOB[m.kind].atk);
+              float(hitX + (Math.random() - 0.5) * 30, hitY - 20, `-${MOB[m.kind].atk}`, "#c17a6a");
+              audio.hit();
+            } else {
+              if (m.kind === "brine") {
+                const pushX = px + (hitDx / Math.max(1, hitDist)) * 18;
+                const pushY = py + (hitDy / Math.max(1, hitDist)) * 18;
+                if (!solidAt(pushX, pushY)) {
+                  px = pushX;
+                  py = pushY;
+                }
+              }
+              hurtPlayer(MOB[m.kind].atk);
+            }
+          }
+        }
+        continue;
+      }
+
       if (dist < aggro && dist > 18) {
         const sp = (m.kind === "wolf" ? 70 : m.kind === "raider" ? 58 : m.kind === "orc" ? 52 : m.kind === "brine" ? 38 : 46) * (m.slow > 0 ? 0.4 : 1);
         const mx2 = m.x + (dx / dist) * sp * dt;
@@ -2321,28 +2412,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
           }
         }
       }
-      const reach = m.kind === "brine" ? 68 : attacksHaven ? 30 : 22;
       if (dist < reach && m.atkCd <= 0) {
-        m.atkCd = m.kind === "brine" ? 1.65 : m.kind === "wraith" ? 1.1 : m.kind === "raider" ? 0.95 : 0.85;
-        if (attacksHaven) {
-          raid.havenHp = Math.max(0, raid.havenHp - MOB[m.kind].atk);
-          float(targetX + (Math.random() - 0.5) * 30, targetY - 20, `-${MOB[m.kind].atk}`, "#c17a6a");
-          burst(targetX, targetY, "#c17a6a", 7);
-          shake = Math.max(shake, 0.16);
-          audio.hit();
-          continue;
-        }
-        if (m.kind === "brine") {
-          burst(m.x, m.y, "#8fbeb8", 24);
-          slashes.push({ x: m.x, y: m.y, ang: Math.atan2(dy, dx), r: 58, t: 0.18, color: "#9ed8d0" });
-          const pushX = px + (dx / Math.max(1, dist)) * 18;
-          const pushY = py + (dy / Math.max(1, dist)) * 18;
-          if (!solidAt(pushX, pushY)) {
-            px = pushX;
-            py = pushY;
-          }
-        }
-        hurtPlayer(MOB[m.kind].atk);
+        m.windupMax = m.kind === "brine" ? 0.78 : m.kind === "orc" ? 0.5 : m.kind === "wraith" ? 0.42 : 0.34;
+        m.windup = m.windupMax;
+        m.attackTarget = attacksHaven ? "haven" : "player";
       }
     }
 
@@ -2360,7 +2433,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             const target = raiders.reduce((best, candidate) =>
               Math.hypot(candidate.x - hx, candidate.y - hy) < Math.hypot(best.x - hx, best.y - hy) ? candidate : best,
             );
-            slashes.push({ x: hx, y: hy, ang: Math.atan2(target.y - hy, target.x - hx), r: 64, t: 0.18, color: "#e07a4a" });
+            addSlash(hx, hy, Math.atan2(target.y - hy, target.x - hx), 64, "#e07a4a", "arc", 0.24);
             hurtMob(target, 8);
           }
         }
@@ -2443,7 +2516,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         for (const m of mobs) {
           if (m.map !== map || m.hp <= 0 || m.id === s.hit) continue;
           if (Math.hypot(m.x - s.x, m.y - s.y) < 15 + s.r) {
-            hurtMob(m, s.dmg, 18 + sp * 0.02, Math.atan2(s.vy, s.vx));
+            hurtMob(m, s.dmg, 18 + sp * 0.02, Math.atan2(s.vy, s.vx), s.color);
             if (s.slow) m.slow = Math.max(m.slow, s.slow);
             if (s.stun) m.stun = Math.max(m.stun, s.stun);
             if (s.poison) m.poison = Math.max(m.poison, 3);
@@ -2465,6 +2538,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
       if (!s.stuck && s.kind === "arrow" && Math.random() < dt * 18) {
         sparks.push({ x: s.x, y: s.y - s.z, vx: -s.vx * 0.1, vy: 8, life: 0.2, color: "#c4b48a", size: 1.4 });
+      } else if (!s.stuck && s.kind === "magic" && Math.random() < dt * 48) {
+        const trailColor = s.spell === "frost" ? "#d8f2ff" : s.spell === "smite" ? "#fff2ad" : s.color;
+        sparks.push({
+          x: s.x - s.vx * 0.018 + (Math.random() - 0.5) * 5,
+          y: s.y - s.z - s.vy * 0.018 + (Math.random() - 0.5) * 5,
+          vx: -s.vx * 0.08 + (Math.random() - 0.5) * 18,
+          vy: -s.vy * 0.08 + (Math.random() - 0.5) * 18,
+          life: 0.24 + Math.random() * 0.18,
+          color: trailColor,
+          size: 1.5 + Math.random() * 2.2,
+        });
       }
       if (dead && s.stuck <= 0) shots.splice(i, 1);
     }
@@ -2472,6 +2556,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     for (let i = slashes.length - 1; i >= 0; i--) {
       slashes[i].t -= dt;
       if (slashes[i].t <= 0) slashes.splice(i, 1);
+    }
+    for (let i = magicFx.length - 1; i >= 0; i--) {
+      magicFx[i].life -= dt;
+      if (magicFx[i].life <= 0) magicFx.splice(i, 1);
     }
     if (Math.random() < dt * 5) {
       sparks.push({
@@ -2917,15 +3005,130 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.textAlign = "left";
       }
     }
+
+    for (const fx of magicFx) {
+      const p = wrld(fx.x, fx.y);
+      const left = Math.max(0, fx.life / fx.max);
+      const progress = 1 - left;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(fx.ang);
+      ctx.globalAlpha = left;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.shadowColor = fx.color;
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = fx.color;
+      ctx.fillStyle = fx.color;
+      if (fx.kind === "afterimage") {
+        ctx.globalAlpha = left * 0.28;
+        ctx.filter = `sepia(0.4) saturate(0.7) drop-shadow(0 0 6px ${fx.color})`;
+        sheet(imgs[HEROES[heroId].sheet], fx.face, -22, -34, 46);
+      } else if (fx.kind === "wave") {
+        const radius = fx.r * (0.28 + progress * 0.82);
+        ctx.globalAlpha = left * 0.72;
+        ctx.lineWidth = 2 + left * 3;
+        ctx.beginPath();
+        ctx.ellipse(0, 7, radius, radius * 0.42, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = left * 0.12;
+        ctx.fill();
+      } else if (fx.kind === "impact") {
+        const length = fx.r * (0.45 + progress * 0.8);
+        ctx.lineWidth = 3 * left;
+        for (let i = 0; i < 4; i++) {
+          ctx.rotate(Math.PI / 2);
+          ctx.beginPath();
+          ctx.moveTo(4, 0);
+          ctx.lineTo(length, 0);
+          ctx.stroke();
+        }
+      } else {
+        const radius = fx.r * (fx.kind === "sigil" ? 0.8 + Math.sin(progress * Math.PI) * 0.25 : 0.55 + progress * 0.5);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.rotate(-progress * Math.PI * 1.4);
+        const points = fx.kind === "sigil" ? 6 : 4;
+        for (let i = 0; i < points; i++) {
+          const a = (i / points) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * radius * 0.58, Math.sin(a) * radius * 0.58);
+          ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+          ctx.stroke();
+        }
+        if (fx.kind === "sigil") {
+          ctx.globalAlpha = left * 0.35;
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            const rr = i % 2 ? radius * 0.45 : radius * 0.9;
+            const x = Math.cos(a) * rr;
+            const y = Math.sin(a) * rr;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+
     for (const m of mobs) {
       if (m.map !== map || m.hp <= 0) continue;
       const boss = m.kind === "brine";
-      const size = boss ? 62 : 34;
-      const s = wrld(m.x - size / 2, m.y - (boss ? 44 : 20));
+      const selected = m.id === huntId;
+      const hovered = m.id === hoverMobId;
+      const size = boss ? 68 : 38;
+      const bob = m.windup > 0 ? Math.sin(time * 24) * 1.2 : Math.sin(time * 5 + m.id) * 0.7;
+      const s = wrld(m.x - size / 2, m.y - (boss ? 49 : 25) + bob);
+      const feet = wrld(m.x, m.y + (boss ? 9 : 8));
+
       ctx.save();
-      if (m.flash > 0) ctx.filter = "brightness(2.4)";
-      else if (boss) ctx.filter = "hue-rotate(155deg) saturate(0.72) brightness(0.86)";
-      else if (m.kind === "raider") ctx.filter = "hue-rotate(205deg) saturate(1.45) brightness(0.82)";
+      ctx.fillStyle = `rgba(6,8,10,${boss ? 0.48 : 0.34})`;
+      ctx.beginPath();
+      ctx.ellipse(feet.x, feet.y, size * 0.36, size * 0.13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (selected || hovered) {
+        const pulse = 0.75 + Math.sin(time * 8) * 0.14;
+        ctx.strokeStyle = selected ? `rgba(240,213,138,${pulse})` : `rgba(232,228,216,${pulse * 0.8})`;
+        ctx.lineWidth = selected ? 3 : 2;
+        ctx.setLineDash(selected ? [7, 4] : [3, 5]);
+        ctx.lineDashOffset = -time * 16;
+        ctx.beginPath();
+        ctx.ellipse(feet.x, feet.y, size * 0.48, size * 0.2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (m.windup > 0 && m.windupMax > 0) {
+        const charged = 1 - m.windup / m.windupMax;
+        const targetX = m.attackTarget === "haven" ? 13 * TILE + 16 : px;
+        const targetY = m.attackTarget === "haven" ? 17 * TILE + 16 : py;
+        const attackAng = Math.atan2(targetY - m.y, targetX - m.x);
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.18 + charged * 0.28;
+        ctx.fillStyle = m.kind === "brine" ? "#78b8ad" : "#c75f55";
+        ctx.beginPath();
+        ctx.ellipse(feet.x, feet.y, size * 0.58, size * 0.24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = m.kind === "brine" ? "#b9eee4" : "#ff9b82";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(feet.x, feet.y, size * 0.58, size * 0.24, 0, -Math.PI / 2, -Math.PI / 2 + charged * Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(feet.x + Math.cos(attackAng) * 12, feet.y + Math.sin(attackAng) * 5);
+        ctx.lineTo(feet.x + Math.cos(attackAng) * (size * 0.68), feet.y + Math.sin(attackAng) * (size * 0.3));
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.save();
+      if (m.flash > 0) ctx.filter = "brightness(2.8) drop-shadow(0 0 7px #fff5df)";
+      else if (boss) ctx.filter = "hue-rotate(155deg) saturate(0.72) brightness(0.86) drop-shadow(0 7px 5px rgba(0,0,0,.5))";
+      else if (m.kind === "raider") ctx.filter = "hue-rotate(205deg) saturate(1.45) brightness(0.82) drop-shadow(0 5px 4px rgba(0,0,0,.45))";
+      else ctx.filter = "drop-shadow(0 5px 4px rgba(0,0,0,.42))";
       if (m.kind === "crab" || boss) sheet(imgs.crab, Math.floor(time * 4) % 4, s.x, s.y, size);
       else sheet(imgs.mobs, MOB[m.kind].sprite, s.x, s.y, size);
       ctx.restore();
@@ -2948,10 +3151,25 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.fillText(MOB[m.kind].name, s.x + 31, s.y - 10);
         ctx.textAlign = "left";
       }
-      ctx.fillStyle = "#2a1818";
-      ctx.fillRect(s.x, s.y - 6, size, boss ? 6 : 4);
-      ctx.fillStyle = boss ? "#78b8ad" : "#c17a6a";
-      ctx.fillRect(s.x, s.y - 6, size * (m.hp / m.max), boss ? 6 : 4);
+      if (boss || selected || hovered || m.hp < m.max || m.windup > 0) {
+        const barW = boss ? size : Math.max(34, size - 2);
+        ctx.fillStyle = "rgba(19,10,12,0.88)";
+        ctx.fillRect(s.x + (size - barW) / 2, s.y - 8, barW, boss ? 7 : 5);
+        ctx.fillStyle = boss ? "#78b8ad" : m.windup > 0 ? "#e38a6f" : "#c17a6a";
+        ctx.fillRect(s.x + (size - barW) / 2, s.y - 8, barW * Math.max(0, m.hp / m.max), boss ? 7 : 5);
+      }
+      if ((selected || hovered) && !boss) {
+        const label = selected ? MOB[m.kind].name : `КЛИК · ${MOB[m.kind].name}`;
+        ctx.save();
+        ctx.font = "600 10px IBM Plex Mono, monospace";
+        ctx.textAlign = "center";
+        const width = ctx.measureText(label).width + 14;
+        ctx.fillStyle = "rgba(8,10,13,0.9)";
+        ctx.fillRect(s.x + size / 2 - width / 2, s.y - 29, width, 17);
+        ctx.fillStyle = selected ? "#f0d58a" : "#e8e4d8";
+        ctx.fillText(label, s.x + size / 2, s.y - 17);
+        ctx.restore();
+      }
     }
     const boss = mobs.find((candidate) => candidate.map === map && candidate.kind === "brine" && candidate.hp > 0);
     if (boss) {
@@ -2972,16 +3190,36 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
     for (const sl of slashes) {
       const p = wrld(sl.x, sl.y);
+      const left = Math.max(0, sl.t / sl.max);
+      const progress = 1 - left;
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(sl.ang);
-      ctx.globalAlpha = Math.max(0, sl.t / 0.18);
+      ctx.globalAlpha = left;
+      ctx.globalCompositeOperation = "lighter";
       ctx.strokeStyle = sl.color;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(0, 0, sl.r, -0.9, 0.9);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.shadowColor = sl.color;
+      ctx.shadowBlur = sl.style === "enemy" ? 8 : 14;
+      ctx.lineCap = "round";
+      ctx.lineWidth = sl.style === "enemy" ? 4 : 3 + left * 4;
+      if (sl.style === "ring") {
+        const radius = sl.r * (0.62 + progress * 0.38);
+        ctx.beginPath();
+        ctx.ellipse(0, 7, radius, radius * 0.45, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = left * 0.32;
+        ctx.lineWidth += 5;
+        ctx.stroke();
+      } else {
+        const arc = sl.style === "enemy" ? 0.65 : 1.05;
+        const radius = sl.r * (0.82 + progress * 0.18);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, -arc, -arc + progress * arc * 2);
+        ctx.stroke();
+        ctx.globalAlpha = left * 0.28;
+        ctx.lineWidth += 6;
+        ctx.stroke();
+      }
       ctx.restore();
     }
     for (const s of shots) {
@@ -3015,14 +3253,50 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.closePath();
         ctx.fill();
       } else {
-        ctx.fillStyle = s.color;
-        ctx.beginPath();
-        ctx.ellipse(0, 0, s.r * 2.4, s.r * 0.7, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 0.35;
-        ctx.beginPath();
-        ctx.ellipse(-s.r, 0, s.r * 3.2, s.r * 1.4, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = s.color;
+        ctx.shadowBlur = s.spell === "smite" ? 18 : 13;
+        if (s.spell === "frost") {
+          ctx.fillStyle = "#d8f2ff";
+          ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-s.r, -s.r, s.r * 2, s.r * 2);
+          ctx.rotate(-Math.PI / 4);
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-s.r * 4, 0);
+          ctx.lineTo(s.r * 2.2, 0);
+          ctx.stroke();
+        } else if (s.spell === "smite") {
+          ctx.fillStyle = "#fff2ad";
+          ctx.beginPath();
+          ctx.moveTo(s.r * 2.8, 0);
+          ctx.lineTo(-s.r * 1.2, -s.r * 0.78);
+          ctx.lineTo(-s.r * 2.2, 0);
+          ctx.lineTo(-s.r * 1.2, s.r * 0.78);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-s.r * 4.2, 0);
+          ctx.lineTo(s.r * 2.6, 0);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = "#ffd09a";
+          ctx.beginPath();
+          ctx.arc(0, 0, s.r * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = s.color;
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.ellipse(-s.r * 0.8, 0, s.r * 3.6, s.r * 1.15, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.28;
+          ctx.beginPath();
+          ctx.ellipse(-s.r * 2, 0, s.r * 5.2, s.r * 2.1, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.restore();
     }
@@ -3099,9 +3373,30 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       }
     }
 
-    const ps = wrld(px - 18, py - 28);
-    const cx = ps.x + 19;
-    const cy = ps.y + 22;
+    const moving = Math.hypot(vx, vy) > 8;
+    const heroSize = 46;
+    const heroBob = moving ? Math.sin(time * 13) * 1.4 : Math.sin(time * 2.4) * 0.45;
+    const ps = wrld(px - heroSize / 2, py - 35 + heroBob);
+    const cx = ps.x + heroSize / 2;
+    const cy = ps.y + 27;
+    const feet = wrld(px, py + 10);
+    ctx.save();
+    ctx.fillStyle = "rgba(5,7,9,0.42)";
+    ctx.beginPath();
+    ctx.ellipse(feet.x, feet.y, 17, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (gearFxT > 0) {
+      const progress = 1 - gearFxT / 1.4;
+      ctx.globalAlpha = Math.max(0, gearFxT / 1.4);
+      ctx.strokeStyle = "#f0d58a";
+      ctx.shadowColor = "#f0d58a";
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(feet.x, feet.y, 18 + progress * 28, 7 + progress * 11, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
     if (level >= 3) {
       ctx.save();
       ctx.globalAlpha = 0.22 + Math.min(0.25, (level - 2) * 0.05);
@@ -3115,8 +3410,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.45;
     if (worn.arm === "shellmail") {
       ctx.save();
-      ctx.filter = "brightness(1.08) saturate(0.76) hue-rotate(24deg)";
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, 38);
+      ctx.filter = "brightness(1.08) saturate(0.76) hue-rotate(24deg) drop-shadow(0 6px 4px rgba(0,0,0,.55))";
+      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
       ctx.restore();
       ctx.fillStyle = "#d8d0a8";
       ctx.beginPath();
@@ -3133,14 +3428,17 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.stroke();
     } else if (worn.arm === "chain") {
       ctx.save();
-      ctx.filter = "brightness(1.18) saturate(0.7)";
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, 38);
+      ctx.filter = "brightness(1.18) saturate(0.7) drop-shadow(0 6px 4px rgba(0,0,0,.55))";
+      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
       ctx.restore();
       ctx.fillStyle = "#c8d0c4";
       ctx.fillRect(cx - 12, cy - 10, 8, 6);
       ctx.fillRect(cx + 4, cy - 10, 8, 6);
     } else {
-      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, 38);
+      ctx.save();
+      ctx.filter = "drop-shadow(0 6px 4px rgba(0,0,0,.55))";
+      sheet(imgs[HEROES[heroId].sheet], dir, ps.x, ps.y, heroSize);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     if (worn.cloak === "sash") {
@@ -3243,7 +3541,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fill();
       ctx.globalAlpha = 1;
     }
-    const angW = aim();
+    const swing = lunge > 0 ? Math.sin((1 - lunge / 0.12) * Math.PI) * 0.72 : 0;
+    const angW = aim() + swing;
     const fx = Math.cos(angW);
     const fy = Math.sin(angW);
     const steel = worn.wep === "steel";
@@ -3314,17 +3613,42 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.globalAlpha = 1;
     }
     if (has("mark")) {
-      ctx.fillStyle = "#e8d48a";
-      ctx.globalAlpha = 0.5 + Math.sin(time * 3) * 0.2;
-      ctx.fillRect(cx - 2, cy - 2, 4, 4);
-      ctx.globalAlpha = 1;
+      ctx.save();
+      ctx.translate(cx, cy + 1);
+      ctx.rotate(time * 0.55);
+      ctx.strokeStyle = "#e8d48a";
+      ctx.shadowColor = "#e8d48a";
+      ctx.shadowBlur = 7;
+      ctx.globalAlpha = 0.52 + Math.sin(time * 3) * 0.18;
+      ctx.strokeRect(-4, -4, 8, 8);
+      ctx.restore();
     }
     if (shieldT > 0) {
-      ctx.strokeStyle = "rgba(200,210,230,0.7)";
+      const shieldPulse = 0.72 + Math.sin(time * 9) * 0.12;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(time * 0.22);
+      ctx.strokeStyle = `rgba(196,224,255,${shieldPulse})`;
+      ctx.fillStyle = "rgba(130,180,230,0.08)";
+      ctx.shadowColor = "#9ec4e8";
+      ctx.shadowBlur = 12;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
+        const x = Math.cos(a) * 25;
+        const y = Math.sin(a) * 25;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 17, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
     if (lyra) {
       const ls = wrld(px - 28, py - 10);
@@ -3461,6 +3785,21 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     return candidates.reduce<(typeof candidates)[number] | null>((best, candidate) => (!best || candidate.d < best.d ? candidate : best), null);
   }
 
+  function mobAt(wx: number, wy: number) {
+    let best: Mob | null = null;
+    let bestDistance = Infinity;
+    for (const mob of mobs) {
+      if (mob.map !== map || mob.hp <= 0) continue;
+      const radius = mob.kind === "brine" ? 42 : 28;
+      const distance = Math.hypot(mob.x - wx, mob.y - wy);
+      if (distance <= radius && distance < bestDistance) {
+        best = mob;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
   function clickLeft(wx: number, wy: number) {
     faceWorld(wx, wy);
     huntId = 0;
@@ -3480,14 +3819,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       moveTo = { x: target.x, y: target.y };
       return;
     }
-    for (const m of mobs) {
-      if (m.map !== map || m.hp <= 0) continue;
-      if (Math.hypot(m.x - wx, m.y - wy) < 22) {
-        huntId = m.id;
-        moveTo = { x: m.x, y: m.y };
-        if (Math.hypot(m.x - px, m.y - py) < 42) attack();
-        return;
-      }
+    const mob = mobAt(wx, wy);
+    if (mob) {
+      huntId = mob.id;
+      moveTo = { x: mob.x, y: mob.y };
+      if (Math.hypot(mob.x - px, mob.y - py) < 42) attack();
+      return;
     }
     moveTo = { x: wx, y: wy };
   }
@@ -3583,7 +3920,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function onPointerMove(e: PointerEvent) {
     const w = worldFromEvent(e);
     faceWorld(w.x, w.y);
+    hoverMobId = mode === "play" ? (mobAt(w.x, w.y)?.id ?? 0) : 0;
+    canvas.style.cursor = hoverMobId ? "crosshair" : "default";
     if (holdLmb && mode === "play" && !talkGo && !huntId) moveTo = { x: w.x, y: w.y };
+  }
+
+  function onPointerLeave() {
+    hoverMobId = 0;
+    canvas.style.cursor = "default";
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -3608,6 +3952,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   window.addEventListener("keyup", onKeyUp);
   canvas.addEventListener("pointerdown", onPointer);
   canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
   canvas.addEventListener("contextmenu", onContext);
@@ -3743,6 +4088,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       window.removeEventListener("blur", onBlur);
       canvas.removeEventListener("pointerdown", onPointer);
       canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("contextmenu", onContext);

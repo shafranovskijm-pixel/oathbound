@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   Check,
   Coins,
   Crown,
@@ -149,6 +150,71 @@ function ItemGlyph({ id, slot, size = "md" }: { id?: ItemId; slot?: EquipmentSlo
     <span className={`item-glyph ${tone} is-${size}`} aria-hidden>
       <Icon />
     </span>
+  );
+}
+
+function HeroPaperDoll({ heroId, equipment }: { heroId: keyof typeof HEROES; equipment: Record<EquipmentSlot, ItemId | null> }) {
+  const hero = HEROES[heroId];
+  const cloak = equipment.cloak;
+  const armor = equipment.arm;
+  const helm = equipment.helm;
+  const weapon = equipment.wep;
+  const visibleLayers = [cloak, armor, helm, weapon].filter(Boolean).length;
+  return (
+    <div className="paper-doll">
+      <div className="paper-doll-stage" aria-label={`Внешность героя: ${visibleLayers} предмета экипировки`}>
+        <span className="paper-doll-aura" aria-hidden />
+        {cloak && cloak !== "sash" ? (
+          <svg className={`paper-doll-layer is-cloak cloak-${cloak}`} viewBox="0 0 128 128" aria-hidden>
+            <path d="M42 46 Q64 38 86 46 L96 109 Q80 120 64 122 Q48 120 32 109 Z" />
+            {cloak === "stormcloak" ? <path className="gear-detail" d="M37 84 Q64 103 91 84 M39 96 Q64 114 89 96" /> : null}
+          </svg>
+        ) : null}
+        <span
+          className="paper-doll-base"
+          style={{ backgroundImage: `url(/sprites/${hero.sheet}.png)` }}
+          aria-hidden
+        />
+        <svg className={`paper-doll-layer is-gear armor-${armor ?? "none"} helm-${helm ?? "none"} weapon-${weapon ?? "none"}`} viewBox="0 0 128 128" aria-hidden>
+          {armor === "chain" ? (
+            <>
+              <path className="gear-fill armor-fill" d="M43 48 Q64 39 85 48 L87 78 Q64 89 41 78 Z" />
+              <path className="gear-detail" d="M46 54 L82 75 M46 64 L75 81 M82 54 L46 75 M82 64 L53 81" />
+            </>
+          ) : null}
+          {armor === "shellmail" ? (
+            <>
+              <path className="gear-fill armor-fill" d="M39 49 Q64 38 89 49 L88 80 Q64 92 40 80 Z" />
+              <path className="gear-detail" d="M44 56 Q50 48 56 56 Q62 48 68 56 Q74 48 80 56 M44 69 Q50 61 56 69 Q62 61 68 69 Q74 61 80 69" />
+            </>
+          ) : null}
+          {cloak === "sash" ? <path className="gear-fill sash-fill" d="M43 48 L83 80 L77 87 L38 55 Z" /> : null}
+          {helm ? (
+            <>
+              <path className="gear-fill helm-fill" d="M44 34 Q64 13 84 34 L82 47 Q64 54 46 47 Z" />
+              <path className="gear-detail" d="M48 37 Q64 29 80 37" />
+              {helm === "firecrown" ? <path className="crown-flame" d="M46 35 L49 18 L58 28 L64 12 L70 28 L79 18 L82 35 Z" /> : null}
+            </>
+          ) : null}
+          {weapon === "harpoon" ? (
+            <>
+              <path className="weapon-line" d="M86 85 L111 30" />
+              <path className="weapon-fill" d="M107 35 L117 21 L114 39 L108 34 L101 31 Z" />
+            </>
+          ) : weapon ? (
+            <>
+              <path className="weapon-line" d="M88 86 L108 42" />
+              <path className="weapon-fill" d="M104 46 L114 29 L111 49 Z" />
+              <path className="weapon-line" d="M99 52 L113 58" />
+            </>
+          ) : null}
+        </svg>
+      </div>
+      <div className="paper-doll-caption">
+        <span><Sparkles /> {visibleLayers}/4 слоя видны в мире</span>
+        <p>{hero.name} · {hero.title}</p>
+      </div>
+    </div>
   );
 }
 
@@ -715,29 +781,41 @@ export function Oathbound() {
                   </div>
                   <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {[...snap.recipes].sort((a, b) => Number(b.ok) - Number(a.ok)).map((r) => (
-                      <li key={r.out} className={`recipe-card ${r.ok ? "is-ready" : ""}`}>
-                        <div className="flex items-start gap-3">
-                          <ItemGlyph id={r.out} slot={r.slot} size="lg" />
-                          <div className="min-w-0">
-                            <p className="font-display text-lg font-semibold leading-tight">{r.name}</p>
-                            <p className="mt-1 text-xs leading-snug text-muted">{r.desc}</p>
+                      <li key={r.out} className="recipe-cell">
+                        <button
+                          type="button"
+                          className={`recipe-card ${r.ok ? "is-ready" : ""}`}
+                          disabled={!r.ok}
+                          onClick={() => g.current?.craft(r.out)}
+                        >
+                          <div className="flex items-start gap-3 text-left">
+                            <ItemGlyph id={r.out} slot={r.slot} size="lg" />
+                            <div className="min-w-0">
+                              <p className="font-display text-lg font-semibold leading-tight">{r.name}</p>
+                              <p className="mt-1 text-xs leading-snug text-muted">{r.desc}</p>
+                              <p className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-subtle">
+                                {r.slot ? `Создастся и сразу наденется · ${SLOT_RU[r.slot]}` : "Создастся и попадёт в сумку"}
+                              </p>
+                            </div>
+                            {r.ok ? <span className="ready-mark" title="Можно создать"><Check /></span> : null}
                           </div>
-                          {r.ok ? <span className="ready-mark" title="Можно создать"><Check /></span> : null}
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-1.5">
-                          {r.need.map((part) => (
-                            <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
-                              <ItemGlyph id={part.id} size="sm" />
-                              {part.name} <b>{part.have}/{part.need}</b>
+                          <div className="mt-4 flex flex-wrap gap-1.5 text-left">
+                            {r.need.map((part) => (
+                              <span key={part.id} className={`ingredient-chip ${part.ok ? "is-enough" : "is-missing"}`}>
+                                <ItemGlyph id={part.id} size="sm" />
+                                {part.name} <b>{part.have}/{part.need}</b>
+                              </span>
+                            ))}
+                            <span className={`ingredient-chip ${snap.gold >= r.gold ? "is-enough" : "is-missing"}`}>
+                              <Coins className="size-3.5" /> золото <b>{snap.gold}/{r.gold}</b>
                             </span>
-                          ))}
-                          <span className={`ingredient-chip ${snap.gold >= r.gold ? "is-enough" : "is-missing"}`}>
-                            <Coins className="size-3.5" /> золото <b>{snap.gold}/{r.gold}</b>
+                          </div>
+                          <span className="craft-action">
+                            <Hammer />
+                            {r.ok ? "Нажми, чтобы создать" : "Собери недостающее"}
+                            {r.ok ? <ArrowRight /> : null}
                           </span>
-                        </div>
-                        <Button className="mt-4 w-full" size="sm" disabled={!r.ok} onClick={() => g.current?.craft(r.out)}>
-                          <Hammer className="size-4" /> {r.ok ? "Создать" : "Не хватает ресурсов"}
-                        </Button>
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -778,16 +856,20 @@ export function Oathbound() {
 
               <section className="mt-5">
                 <p className="font-mono text-[10px] tracking-[0.2em] text-muted">НАДЕТО СЕЙЧАС</p>
-                <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
-                  {equippedSlots.map(({ slot, item }) => (
-                    <div key={slot} className={`equipment-slot ${item ? "is-filled" : ""}`}>
-                      <ItemGlyph id={item?.id} slot={slot} />
-                      <div className="min-w-0">
-                        <p className="font-mono text-[10px] uppercase tracking-wider text-muted">{SLOT_RU[slot]}</p>
-                        <p className="mt-0.5 truncate text-sm font-medium">{item?.name ?? "Пусто"}</p>
+                <div className="inventory-loadout mt-2">
+                  {snap.hero ? <HeroPaperDoll heroId={snap.hero} equipment={snap.equipment} /> : null}
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                    {equippedSlots.map(({ slot, item }) => (
+                      <div key={slot} className={`equipment-slot ${item ? "is-filled" : ""}`}>
+                        <ItemGlyph id={item?.id} slot={slot} />
+                        <div className="min-w-0">
+                          <p className="font-mono text-[10px] uppercase tracking-wider text-muted">{SLOT_RU[slot]}</p>
+                          <p className="mt-0.5 truncate text-sm font-medium">{item?.name ?? "Пусто"}</p>
+                          <p className="mt-1 text-[10px] leading-tight text-subtle">{item ? "Отображается на герое" : "Найди или создай предмет"}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </section>
 
@@ -796,21 +878,29 @@ export function Oathbound() {
                   <p className="font-mono text-[10px] tracking-[0.2em] text-muted">ЭКИПИРОВКА</p>
                   <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {equipmentItems.map((item) => (
-                      <li key={item.id} className={`item-card ${item.on ? "is-equipped" : ""}`}>
-                        <ItemGlyph id={item.id} slot={item.slot} size="lg" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-semibold">{item.name}</p>
-                              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">{item.slot ? SLOT_RU[item.slot] : "Предмет"}</p>
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={`item-card w-full text-left ${item.on ? "is-equipped" : ""}`}
+                          disabled={item.on}
+                          onClick={() => g.current?.equip(item.id)}
+                        >
+                          <ItemGlyph id={item.id} slot={item.slot} size="lg" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-semibold">{item.name}</p>
+                                <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">{item.slot ? SLOT_RU[item.slot] : "Предмет"}</p>
+                              </div>
+                              {item.on ? <span className="equipped-badge"><Check /> Надето</span> : null}
                             </div>
-                            {item.on ? <span className="equipped-badge"><Check /> Надето</span> : null}
+                            <p className="mt-2 text-xs leading-snug text-muted">{item.desc}</p>
+                            <span className="equip-action">
+                              {item.on ? "Уже видно на герое" : "Нажми карточку, чтобы надеть"}
+                              {!item.on ? <ArrowRight /> : null}
+                            </span>
                           </div>
-                          <p className="mt-2 text-xs leading-snug text-muted">{item.desc}</p>
-                          {!item.on ? (
-                            <Button className="mt-3 w-full" size="sm" variant="ghost" onClick={() => g.current?.equip(item.id)}>Надеть</Button>
-                          ) : null}
-                        </div>
+                        </button>
                       </li>
                     ))}
                   </ul>
