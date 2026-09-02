@@ -48,12 +48,14 @@ const IDLE: Snapshot = {
   quests: [],
   spells: [],
   talents: null,
+  skills: [],
   hero: null,
   muted: false,
   place: "",
   xpNeed: 36,
   meleeCd: 0,
   dodgeCd: 0,
+  combat: null,
   transport: { id: "foot", name: "Пешком", speed: 118, action: "Shift — уворот" },
   buildings: [],
   waypoints: [],
@@ -118,6 +120,21 @@ function HudIco({ id }: { id: keyof typeof ICO }) {
     />
   );
 }
+
+function AldricSkillIco({ frame }: { frame: 0 | 1 | 2 | 3 }) {
+  const col = frame % 2;
+  const row = Math.floor(frame / 2);
+  return (
+    <span
+      className="aldric-skill-ico"
+      style={{ backgroundPosition: `${col * 100}% ${row * 100}%` }}
+      aria-hidden
+    />
+  );
+}
+
+const ALDRIC_SPELL_ICON = { smite: 1, guard: 2, cleave: 3 } as const;
+const TALENT_PATH_RU = { shield: "Путь щита", blade: "Путь клинка", oath: "Путь клятвы" } as const;
 
 const NPC_FACE: Record<string, string> = {
   noll: "/portraits/ryn.png",
@@ -574,6 +591,16 @@ export function Oathbound() {
               <p className="mt-1.5 font-mono text-[10px] tabular-nums text-muted">
                 HP {Math.ceil(snap.hp)}/{snap.maxHp} · MP {Math.floor(snap.mp)}/{snap.maxMp} · УР {snap.level}
               </p>
+              <p className="mt-1 font-mono text-[9px] tabular-nums text-subtle">ОПЫТ {snap.xp}/{snap.xpNeed}</p>
+              {snap.combat ? (
+                <div className={`combat-chain mt-2 ${snap.combat.riposte ? "is-riposte" : ""}`}>
+                  <span className="combat-chain-pips" aria-hidden>
+                    {[1, 2, 3].map((step) => <i key={step} className={snap.combat && snap.combat.combo >= step ? "is-on" : ""} />)}
+                  </span>
+                  <b>{snap.combat.label}</b>
+                  <em style={{ width: `${Math.min(100, (snap.combat.window / 1.35) * 100)}%` }} />
+                </div>
+              ) : null}
               {snap.tide ? (
                 <div className="mt-2">
                   <p className="font-mono text-[10px] tracking-widest text-muted">{snap.tide.label}</p>
@@ -689,14 +716,14 @@ export function Oathbound() {
 
         {open ? (
           <div className="absolute left-1/2 -translate-x-1/2 bottom-4 flex flex-wrap items-end justify-center gap-2 pointer-events-auto max-w-2xl px-3 hud-ink">
-            <Slot label="ЛКМ" name="Удар" icon={<HudIco id="melee" />} ready={snap.meleeCd} max={0.4} disabled={snap.mode !== "play"} on={snap.activeSlot < 0} onClick={() => g.current?.select(-1)} />
+            <Slot label="ЛКМ" name={snap.hero === "aldric" ? "Комбо клинка" : "Удар"} icon={snap.hero === "aldric" ? <AldricSkillIco frame={0} /> : <HudIco id="melee" />} ready={snap.meleeCd} max={0.54} disabled={snap.mode !== "play"} on={snap.activeSlot < 0} onClick={() => g.current?.select(-1)} />
             <Slot label="Shift" name={snap.transport.id === "boat" ? "Манёвр" : "Уворот"} icon={<HudIco id="dash" />} ready={snap.dodgeCd} max={snap.transport.id === "boat" ? 1.4 : 1.05} disabled={snap.mode !== "play"} onClick={() => g.current?.dodge()} />
             {snap.spells.map((s, i) => (
               <Slot
                 key={s.id}
                 label={s.key}
                 name={s.name}
-                icon={<HudIco id={s.id} />}
+                icon={snap.hero === "aldric" && s.id in ALDRIC_SPELL_ICON ? <AldricSkillIco frame={ALDRIC_SPELL_ICON[s.id as keyof typeof ALDRIC_SPELL_ICON]} /> : <HudIco id={s.id} />}
                 ready={s.ready}
                 max={SPELLS[s.id].cd}
                 disabled={snap.mode !== "play" || snap.mp < s.cost}
@@ -1091,17 +1118,38 @@ export function Oathbound() {
 
         {snap.mode === "talent" && snap.talents ? (
           <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-auto hud-ink">
-            <div className="overlay-card w-full max-w-lg">
-              <p className="font-mono text-xs tracking-widest text-muted">УРОВЕНЬ {snap.level}</p>
-              <h2 className="mt-1 font-display text-xl font-semibold">Талант</h2>
-              <div className="mt-4">
+            <div className="overlay-card level-up-shell w-full max-w-4xl">
+              <header className="level-up-head">
+                <div className="level-medallion"><span>{snap.level}</span></div>
+                <div>
+                  <p className="font-mono text-xs tracking-[0.22em] text-[#f0d58a]">КЛЯТВА СТАЛА СИЛЬНЕЕ</p>
+                  <h2 className="mt-1 font-display text-3xl font-semibold">{snap.hero === "aldric" ? "Выбери, каким станет Алдрик" : "Выбери новый талант"}</h2>
+                  <p className="mt-1 text-sm text-muted">Уровень уже дал +4 HP, +2 MP и +1 к силе. Теперь выбери один новый приём.</p>
+                </div>
+              </header>
+              <div className="talent-grid mt-5">
                 {snap.talents.map((t) => (
-                  <button key={t.id} type="button" className="choice" onClick={() => g.current?.pickTalent(t.id)}>
-                    <p className="font-display text-lg">{t.name}</p>
-                    <p className="text-sm text-muted mt-1">{t.desc}</p>
+                  <button key={t.id} type="button" className={`talent-card path-${t.path ?? "other"}`} onClick={() => g.current?.pickTalent(t.id)}>
+                    <span className="talent-art">{t.icon !== undefined ? <AldricSkillIco frame={t.icon} /> : <Sparkles />}</span>
+                    <span className="talent-copy">
+                      <span className="talent-meta">{t.path ? TALENT_PATH_RU[t.path] : "Талант"} · ступень {t.tier ?? 1}</span>
+                      <strong>{t.name}</strong>
+                      <span>{t.desc}</span>
+                      {t.requires ? <small>Продолжает: {t.requires}</small> : <small>Открывает новую боевую ветвь</small>}
+                    </span>
+                    <span className="talent-pick">Принять <ArrowRight /></span>
                   </button>
                 ))}
               </div>
+              <footer className="level-up-footer">
+                <span>Уже изучено</span>
+                {snap.skills.length ? snap.skills.map((skill) => (
+                  <span key={skill.id} className="learned-skill">
+                    {skill.icon !== undefined ? <AldricSkillIco frame={skill.icon} /> : <Check />}
+                    {skill.name}
+                  </span>
+                )) : <b>Это первая настоящая развилка Алдрика</b>}
+              </footer>
             </div>
           </div>
         ) : null}

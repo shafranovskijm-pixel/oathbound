@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { ITEM, MOB, NPCS } from "../src/game/content.ts";
+import { ALDRIC_TALENT_PATHS, TALENTS } from "../src/game/heroes.ts";
 import { BUILDINGS } from "../src/game/keep.ts";
 import { blocked, MAPS, SPAWN } from "../src/game/world.ts";
 
@@ -104,6 +105,28 @@ test("first-night attackers have open routes to the shorefire", () => {
       assert.equal(reachable("shoal", { c, r }, fire), true, `night spawn ${c},${r} must reach the shorefire`);
     }
   }
+});
+
+test("Aldric has three readable two-step combat paths and production art", async () => {
+  const paths = Object.entries(ALDRIC_TALENT_PATHS);
+  assert.deepEqual(paths.map(([path]) => path).sort(), ["blade", "oath", "shield"]);
+  for (const [path, [first, second]] of paths) {
+    assert.equal(TALENTS[first].hero, "aldric");
+    assert.equal(TALENTS[first].path, path);
+    assert.equal(TALENTS[first].tier, 1);
+    assert.equal(TALENTS[second].hero, "aldric");
+    assert.equal(TALENTS[second].path, path);
+    assert.equal(TALENTS[second].tier, 2);
+    assert.equal(TALENTS[second].requires, first);
+    assert.ok(TALENTS[first].desc.length >= 28);
+    assert.ok(TALENTS[second].desc.length >= 28);
+  }
+  const actionArt = await readFile(new URL("../public/sprites/hero-aldric-action-v2.png", import.meta.url));
+  const shoreActionArt = await readFile(new URL("../public/sprites/hero-aldric-shore-action-v2.png", import.meta.url));
+  const skillArt = await readFile(new URL("../public/sprites/aldric-skills-v2.png", import.meta.url));
+  assert.ok(actionArt.byteLength > 250_000);
+  assert.ok(shoreActionArt.byteLength > 250_000);
+  assert.ok(skillArt.byteLength > 250_000);
 });
 
 test("starter island lore is discoverable and backed by original art", async () => {
