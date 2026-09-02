@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - "automation/browser-preview-*"
+  workflow_dispatch:
+
+concurrency:
+  group: oathbound-source-snapshot-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
