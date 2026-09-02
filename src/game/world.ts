@@ -311,12 +311,12 @@ function buildGrotto(): TileCh[][] {
 
 function buildHell(): TileCh[][] {
   const cols = 48;
-  const rows = 32;
+  const rows = 48;
   const t: TileCh[][] = Array.from({ length: rows }, () => Array<TileCh>(cols).fill("W"));
   for (let r = 4; r < rows - 1; r++) {
     for (let c = 7; c < cols - 7; c++) t[r][c] = "d";
   }
-  for (let r = 7; r < 25; r++) {
+  for (let r = 7; r < 41; r++) {
     for (let c = 2; c <= 5; c++) t[r][c] = "L";
     for (let c = cols - 6; c <= cols - 3; c++) t[r][c] = "L";
   }
@@ -324,7 +324,7 @@ function buildHell(): TileCh[][] {
     for (let c = 20; c <= 27; c++) t[r][c] = "d";
   }
   for (let c = 14; c <= 33; c++) t[8][c] = "d";
-  t[31][24] = "p";
+  t[46][24] = "p";
   return t;
 }
 
@@ -393,7 +393,7 @@ export const PLACE: Record<MapId, string> = {
 };
 
 export const EXITS: Record<MapId, { c: number; r: number; to: MapId; tc: number; tr: number }[]> = {
-  hell: [{ c: 24, r: 31, to: "shoal", tc: 6, tr: 13 }],
+  hell: [{ c: 24, r: 46, to: "shoal", tc: 6, tr: 13 }],
   shoal: [],
   strait: [],
   over: [

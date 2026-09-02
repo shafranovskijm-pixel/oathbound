@@ -35,10 +35,12 @@ test("infernal prologue has a reachable exit and production art", async () => {
   assert.ok(MAPS.hell.length >= 28);
   assert.ok(MAPS.hell[0].length >= 40);
   assert.equal(blocked("hell", SPAWN.hell.c, SPAWN.hell.r), false);
-  assert.equal(reachable("hell", SPAWN.hell, { c: 24, r: 31 }), true);
+  assert.equal(reachable("hell", SPAWN.hell, { c: 24, r: 46 }), true);
   const roomArt = await readFile(new URL("../public/sprites/hell-reception-v1.png", import.meta.url));
   const devilArt = await readFile(new URL("../public/sprites/devil-broker-v1.png", import.meta.url));
   assert.ok(roomArt.byteLength > 500_000);
+  assert.equal(roomArt.readUInt32BE(16), 1536);
+  assert.equal(roomArt.readUInt32BE(20), 1536);
   assert.ok(devilArt.byteLength > 150_000);
 });
 

@@ -344,6 +344,10 @@ type Coin = { map: MapId; x: number; y: number; z: number; vx: number; vy: numbe
 type GroundItem = { id: number; map: MapId; x: number; y: number; z: number; vz: number; wait: number; item: ItemId };
 type HeroAction = "idle" | "attack" | "smite" | "guard" | "cleave" | "dodge" | "level";
 
+const HELL_DEVIL = { c: 24, r: 16 } as const;
+const HELL_EXIT = { c: 24, r: 46 } as const;
+const HELL_INTRO_CAMERA_Y = 19 * TILE;
+
 const HELL_INTRO = [
   { speaker: "devil", name: "Господин Люциферий · кадровик", line: "Письку любишь?", action: "Что?..", devilFrame: 1 },
   { speaker: "hero", name: "Алдрик · пока ещё безработный", line: "Н-е-ет.", action: "Очень убедительно", devilFrame: 0 },
@@ -1803,8 +1807,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     log.length = 0;
     log.push(`${h.name} приходит в себя в приёмной нижнего мира. На стойке лежит дело с единственным обвинением: «слишком добрый».`);
     log.push("Дьявол собирается провести собеседование. Оно сразу идёт не по плану.");
-    cam.x = px;
-    cam.y = py;
+    cam.x = HELL_DEVIL.c * TILE + 16;
+    cam.y = HELL_INTRO_CAMERA_Y;
     sparks.length = 0;
     floaters.length = 0;
     shots.length = 0;
@@ -1843,8 +1847,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     mode = "play";
     flags.add("hellDevilGone");
     devilFade = 1.45;
-    const devilX = 24 * TILE + 16;
-    const devilY = 9 * TILE + 16;
+    const devilX = HELL_DEVIL.c * TILE + 16;
+    const devilY = HELL_DEVIL.r * TILE + 16;
     addMagic("sigil", devilX, devilY, "#df4d31", 56, 1.15);
     addMagic("wave", devilX, devilY, "#f07a42", 72, 1.05);
     burst(devilX, devilY, "#e05232", 42);
@@ -4029,8 +4033,16 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     checkExits();
     checkPortals();
     const k = 1 - Math.exp(-5 * dt);
-    cam.x += (px - cam.x) * k;
-    cam.y += (py - cam.y) * k;
+    let cameraX = map === "hell" && mode === "intro" ? HELL_DEVIL.c * TILE + 16 : px;
+    let cameraY = map === "hell" && mode === "intro" ? HELL_INTRO_CAMERA_Y : py;
+    if (map === "hell") {
+      const worldW = MAP_SIZE.hell.cols * TILE;
+      const worldH = MAP_SIZE.hell.rows * TILE;
+      cameraX = worldW <= cssW ? worldW / 2 : Math.max(cssW / 2, Math.min(worldW - cssW / 2, cameraX));
+      cameraY = worldH <= cssH ? worldH / 2 : Math.max(cssH / 2, Math.min(worldH - cssH / 2, cameraY));
+    }
+    cam.x += (cameraX - cam.x) * k;
+    cam.y += (cameraY - cam.y) * k;
   }
 
   function cellImg(ch: string, m: MapId) {
@@ -4773,8 +4785,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (showDevil) {
         const fade = mode === "intro" ? 1 : Math.min(1, devilFade / 1.45);
         const drift = mode === "intro" ? Math.sin(time * 2.4) * 2 : (1 - fade) * -54;
-        const devilSize = 218;
-        const devil = wrld(24 * TILE + 16 - devilSize / 2, 9 * TILE + 24 - devilSize * 0.78 + drift);
+        const devilSize = 250;
+        const devil = wrld(
+          HELL_DEVIL.c * TILE + 16 - devilSize / 2,
+          HELL_DEVIL.r * TILE + 24 - devilSize * 0.78 + drift,
+        );
         const frame = mode === "intro" ? HELL_INTRO[Math.min(introStep, HELL_INTRO.length - 1)].devilFrame : 3;
         ctx.save();
         ctx.globalAlpha = fade;
@@ -4783,8 +4798,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.restore();
       }
       if (mode === "play") {
-        const gateX = 24 * TILE + 16;
-        const gateY = 30 * TILE + 12;
+        const gateX = HELL_EXIT.c * TILE + 16;
+        const gateY = HELL_EXIT.r * TILE + 12;
         const gate = wrld(gateX, gateY);
         ctx.save();
         ctx.translate(gate.x, gate.y);
