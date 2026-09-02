@@ -31,6 +31,17 @@ test("public content mirrors the source of truth", () => {
   assert.deepEqual(publicCopy, source);
 });
 
+test("infernal prologue has a reachable exit and production art", async () => {
+  assert.ok(MAPS.hell.length >= 28);
+  assert.ok(MAPS.hell[0].length >= 40);
+  assert.equal(blocked("hell", SPAWN.hell.c, SPAWN.hell.r), false);
+  assert.equal(reachable("hell", SPAWN.hell, { c: 24, r: 31 }), true);
+  const roomArt = await readFile(new URL("../public/sprites/hell-reception-v1.png", import.meta.url));
+  const devilArt = await readFile(new URL("../public/sprites/devil-broker-v1.png", import.meta.url));
+  assert.ok(roomArt.byteLength > 500_000);
+  assert.ok(devilArt.byteLength > 150_000);
+});
+
 test("island is a navigable region instead of a single room", () => {
   assert.ok(MAPS.isle.length >= 20);
   assert.ok(MAPS.isle[0].length >= 30);

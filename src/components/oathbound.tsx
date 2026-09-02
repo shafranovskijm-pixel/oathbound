@@ -27,7 +27,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { MOB, type ItemId, type Slot as EquipmentSlot } from "@/game/content";
 import { mountGame, type GameHandle, type Snapshot } from "@/game/engine";
-import { HERO_LIST, HEROES, SPELLS, type SpellId } from "@/game/heroes";
+import { HEROES, SPELLS, type SpellId } from "@/game/heroes";
 import { MAPS } from "@/game/world";
 
 const IDLE: Snapshot = {
@@ -43,6 +43,7 @@ const IDLE: Snapshot = {
   log: [],
   hint: "",
   talk: null,
+  intro: null,
   items: [],
   party: [],
   quests: [],
@@ -161,8 +162,6 @@ const APPEARANCE_RU: Record<Snapshot["appearance"], string> = {
 };
 const TIER_RU = { 1: "I · основа", 2: "II · хозяйство", 3: "III · оплот" } as const;
 const SLOT_RU: Record<EquipmentSlot, string> = { wep: "Оружие", arm: "Броня", cloak: "Плащ", helm: "Шлем" };
-const HP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].hp));
-const MP_CAP = Math.max(...HERO_LIST.map((id) => HEROES[id].mp));
 const SITE_VISUAL: Record<string, number> = { grove: 0, mill: 1, ridge: 2, marsh: 3, cape: 4, haven: 5 };
 
 function saveDate(value: number) {
@@ -549,8 +548,19 @@ export function Oathbound() {
     };
   }, []);
 
+  useEffect(() => {
+    if (snap.mode !== "intro") return;
+    const advance = (event: KeyboardEvent) => {
+      if (event.code !== "Enter" && event.code !== "Space" && event.code !== "KeyE") return;
+      event.preventDefault();
+      gameRef.current?.nextIntro();
+    };
+    window.addEventListener("keydown", advance);
+    return () => window.removeEventListener("keydown", advance);
+  }, [snap.mode, snap.intro?.step]);
+
   const g = gameRef;
-  const playing = snap.mode !== "menu";
+  const playing = snap.mode !== "menu" && snap.mode !== "intro";
   const hpPct = snap.maxHp ? (snap.hp / snap.maxHp) * 100 : 0;
   const mpPct = snap.maxMp ? (snap.mp / snap.maxMp) * 100 : 0;
   const xpPct = snap.xpNeed ? Math.min(100, (snap.xp / snap.xpNeed) * 100) : 0;
@@ -759,72 +769,71 @@ export function Oathbound() {
           </div>
         ) : null}
 
-        {snap.mode === "menu" ? (
-          <div className="oath-menu absolute inset-0 flex items-center justify-center p-3 md:p-8 pointer-events-auto overflow-auto hud-ink">
-            <span className="menu-embers" aria-hidden />
-            <div className="relative w-full max-w-5xl py-6">
-              <header className="mb-7 text-center">
-                <p className="font-mono text-xs tracking-[0.28em] text-[#d9b879]">ТАМ, ГДЕ ГОРИТ ОЧАГ, КЛЯТВА ЕЩЁ ЖИВА</p>
-                <h1 className="mt-2 font-display text-4xl font-semibold tracking-wide md:text-6xl">OATHBOUND</h1>
-                <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
-                  Ты приходишь в себя почти без одежды на Острове Трёх досок. Первый сундук даст клинок, первый бар — слух о семи частях карты, а первая лодка откроет путь к Вестмеру, крепости и морским войнам.
-                </p>
-                {snap.canContinue && snap.savePreview ? (
-                  <div className="menu-save-card mx-auto mt-5">
-                    <img src={`/portraits/${snap.savePreview.heroId}.png`} alt="" className="menu-save-portrait" />
-                    <div className="min-w-0 text-left">
-                      <p className="font-mono text-[10px] tracking-[0.2em] text-[#d9b879]">ПРОДОЛЖИТЬ КЛЯТВУ</p>
-                      <h2 className="mt-1 truncate font-display text-2xl font-semibold">{snap.savePreview.hero} · уровень {snap.savePreview.level}</h2>
-                      <p className="mt-1 text-xs text-muted">{snap.savePreview.place} · Двор {snap.savePreview.built}/6 · {saveDate(snap.savePreview.updatedAt)}</p>
-                    </div>
-                    <Button onClick={() => g.current?.continueGame()}>Вернуться к очагу</Button>
-                  </div>
-                ) : null}
-                <div className="menu-choice-divider"><span>{snap.canContinue ? "ИЛИ НОВАЯ КЛЯТВА" : "ВЫБЕРИ ГЕРОЯ"}</span></div>
-              </header>
-              <div className="grid gap-8 md:grid-cols-3">
-                {HERO_LIST.map((id) => {
-                  const h = HEROES[id];
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => g.current?.start(id)}
-                      className="group flex flex-col items-center text-center"
-                    >
-                      <img
-                        src={`/portraits/${id}.png`}
-                        alt={h.name}
-                        className="h-48 md:h-56 w-full object-contain object-bottom"
-                      />
-                      <div className="relative mt-1 flex h-24 items-end justify-center">
-                        <span className="absolute bottom-2 h-3 w-16 rounded-full bg-fg/20" aria-hidden />
-                        <div
-                          className="hero-sprite is-prologue"
-                          style={{ backgroundImage: `url(/sprites/${h.sheet}-prologue.png)` }}
-                          aria-hidden
-                        />
-                      </div>
-                      <p className="mt-1 font-display text-3xl font-semibold">{h.name}</p>
-                      <p className="mt-1 text-xs text-muted">{h.title}</p>
-                      <div className="mt-3 w-36">
-                        <div className="stat-bar h-2"><i className="bg-danger" style={{ width: `${(h.hp / HP_CAP) * 100}%` }} /></div>
-                        <div className="stat-bar mt-1 h-2"><i className="bg-ok" style={{ width: `${(h.mp / MP_CAP) * 100}%` }} /></div>
-                      </div>
-                      <div className="mt-4 flex justify-center gap-3">
-                        {h.spells.map((sid) => (
-                          <span key={sid} className="pick-spell">
-                            <span className="hud-slot" aria-hidden>
-                              <HudIco id={sid} />
-                            </span>
-                            <span className="font-mono text-xs text-muted whitespace-nowrap">{SPELLS[sid].name}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </button>
-                  );
-                })}
+        {snap.mode === "intro" && snap.intro ? (
+          <div className="hell-intro absolute inset-0 pointer-events-auto hud-ink">
+            <div className="hell-intro-stamp">
+              <span>ЛИЧНОЕ ДЕЛО № 666-Д</span>
+              <b>ОБВИНЕНИЕ: ПАТОЛОГИЧЕСКАЯ ДОБРОТА</b>
+            </div>
+            <section className={`hell-dialogue is-${snap.intro.speaker}`} aria-live="polite">
+              {snap.intro.speaker === "devil" ? (
+                <span
+                  className="devil-dialogue-portrait"
+                  style={{ backgroundPosition: `${(snap.intro.devilFrame % 2) * 100}% ${Math.floor(snap.intro.devilFrame / 2) * 100}%` }}
+                  aria-hidden
+                />
+              ) : (
+                <img src="/portraits/aldric.png" alt="Алдрик" className="hero-dialogue-portrait" />
+              )}
+              <div className="hell-dialogue-copy">
+                <p>{snap.intro.name}</p>
+                <blockquote>{snap.intro.line}</blockquote>
+                <div className="hell-dialogue-progress" aria-label={`Реплика ${snap.intro.step + 1} из 4`}>
+                  {[0, 1, 2, 3].map((step) => <i key={step} className={step <= snap.intro!.step ? "is-on" : ""} />)}
+                </div>
               </div>
+              <button type="button" onClick={() => g.current?.nextIntro()}>
+                {snap.intro.action}<ArrowRight />
+                <small>Enter / E</small>
+              </button>
+            </section>
+          </div>
+        ) : null}
+
+        {snap.mode === "menu" ? (
+          <div className="oath-menu good-guy-menu absolute inset-0 flex items-center justify-center p-3 md:p-8 pointer-events-auto overflow-auto hud-ink">
+            <span className="menu-embers" aria-hidden />
+            <span className="menu-devil" aria-hidden />
+            <div className="good-menu-shell relative w-full max-w-3xl">
+              <p className="good-menu-kicker">OATHBOUND // НЕПРАВИЛЬНО ОФОРМЛЕННАЯ ДУША</p>
+              <h1>ДОБРЯК</h1>
+              <h2>Очень плохое место для хорошего человека</h2>
+              <p className="good-menu-copy">
+                Алдрик помогал бесплатно так долго, что адская бухгалтерия приняла это за извращение. Теперь дьявол отправит его без денег и штанов на Остров Трёх досок — собирать карту сокровища, строить крепость и по-прежнему отказываться от награды.
+              </p>
+              <div className="good-menu-case">
+                <img src="/portraits/aldric.png" alt="Алдрик" />
+                <div>
+                  <span>ГЛАВНЫЙ ПОДОЗРЕВАЕМЫЙ</span>
+                  <strong>Алдрик «Да не надо денег»</strong>
+                  <small>34 здоровья · 0 золота · совесть мешает критическим ударам</small>
+                </div>
+              </div>
+              <Button className="good-menu-start" onClick={() => g.current?.start("aldric")}>
+                Начать с адского собеседования <ArrowRight />
+              </Button>
+              {snap.canContinue && snap.savePreview ? (
+                <div className="menu-save-card mx-auto mt-4">
+                  <img src={`/portraits/${snap.savePreview.heroId}.png`} alt="" className="menu-save-portrait" />
+                  <div className="min-w-0 text-left">
+                    <p className="font-mono text-[10px] tracking-[0.2em] text-[#d9b879]">ПРОДОЛЖИТЬ СТАРОЕ ДЕЛО</p>
+                    <h3 className="mt-1 truncate font-display text-xl font-semibold">{snap.savePreview.hero} · уровень {snap.savePreview.level}</h3>
+                    <p className="mt-1 text-xs text-muted">{snap.savePreview.place} · Двор {snap.savePreview.built}/6 · {saveDate(snap.savePreview.updatedAt)}</p>
+                  </div>
+                  <Button variant="ghost" onClick={() => g.current?.continueGame()}>Вернуться</Button>
+                </div>
+              ) : null}
+              <footer>18+ · грубые шутки · добрые поступки · никакой оплаты</footer>
             </div>
           </div>
         ) : null}

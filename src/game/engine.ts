@@ -28,7 +28,7 @@ import {
   type MapId,
 } from "./world";
 
-export type Mode = "menu" | "play" | "pause" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
+export type Mode = "menu" | "intro" | "play" | "pause" | "talk" | "inv" | "journal" | "talent" | "way" | "build" | "atlas" | "site" | "dead" | "win";
 export type Appearance = "castaway" | "shore" | "base" | "armor" | "mage" | "thief" | "pirate";
 
 export type CostPart = { id: ItemId; name: string; have: number; need: number; ok: boolean };
@@ -46,6 +46,7 @@ export type Snapshot = {
   log: string[];
   hint: string;
   talk: { name: string; text: string; portrait: string; role: string; ask: string; keys: { id: string; label: string }[] } | null;
+  intro: { step: number; speaker: "devil" | "hero" | "narrator"; name: string; line: string; action: string; devilFrame: 0 | 1 | 2 | 3 } | null;
   items: { id: ItemId; name: string; desc: string; count: number; slot?: Slot; on?: boolean; effects: string[] }[];
   party: string[];
   quests: { text: string; done: boolean }[];
@@ -181,6 +182,7 @@ export type GameHandle = {
   continueGame: () => boolean;
   pause: () => void;
   returnToMenu: () => void;
+  nextIntro: () => void;
   keyword: (k: string) => void;
   attack: () => void;
   dodge: () => void;
@@ -342,6 +344,19 @@ type Coin = { map: MapId; x: number; y: number; z: number; vx: number; vy: numbe
 type GroundItem = { id: number; map: MapId; x: number; y: number; z: number; vz: number; wait: number; item: ItemId };
 type HeroAction = "idle" | "attack" | "smite" | "guard" | "cleave" | "dodge" | "level";
 
+const HELL_INTRO = [
+  { speaker: "devil", name: "Господин Люциферий · кадровик", line: "Письку любишь?", action: "Что?..", devilFrame: 1 },
+  { speaker: "hero", name: "Алдрик · пока ещё безработный", line: "Н-е-ет.", action: "Очень убедительно", devilFrame: 0 },
+  { speaker: "devil", name: "Господин Люциферий", line: "А похоже, будто любишь.", action: "Пережить эту паузу", devilFrame: 2 },
+  {
+    speaker: "devil",
+    name: "Господин Люциферий",
+    line: "Ладно, Добряк. Твоё наказание — помогать всем бесплатно, пока не поймёшь цену золота, долга и собственной души.",
+    action: "Получить худшую работу в мире",
+    devilFrame: 3,
+  },
+] as const;
+
 function loadImg(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
@@ -416,6 +431,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let levelFxT = 0;
   let skillFlashFrame = -1;
   let skillFlashT = 0;
+  let introStep = 0;
+  let devilFade = 0;
   let iframe = 0;
   let transport: SavedTransport = "foot";
   let transportAngle = 0;
@@ -588,7 +605,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-action-v2", "hero-aldric-shore-action-v2", "aldric-skills-v2", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "shoal-settlement-v1", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-action-v2", "hero-aldric-shore-action-v2", "aldric-skills-v2", "devil-broker-v1", "hell-reception-v1", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "shoal-settlement-v1", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -1079,6 +1096,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function quests() {
     const eiraKills = Math.min(4, islandCrabKills());
     return [
+      { text: "Пережить собеседование у дьявола и выбраться из приёмной", done: flags.has("hellEscape") },
       { text: "Обыскать разбитый сундук и одеться", done: opened.has("shoal-wreck") },
       { text: "Купить у Нолла первый обрывок карты за 3 золота", done: has("mapshard") },
       { text: `Услышать голоса острова (${Math.min(3, loreCount())}/3)`, done: loreCount() >= 3 },
@@ -1121,6 +1139,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function journeyHint() {
+    if (map === "hell") return "Цель: дьявол исчез. Иди по центральной дорожке вниз — красный разлом вышвырнет тебя в начало настоящей игры.";
     if (!flags.has("leftShoal")) {
       if (!opened.has("shoal-wreck")) return "Цель: осмотри разбитый сундук на западном пляже — там первая одежда, клинок и несколько монет.";
       if (!has("mapshard")) return "Цель: зайди в бар «Три доски» на севере тропы и купи у Нолла первый обрывок карты за 3 золота.";
@@ -1184,6 +1203,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             keys: talkKeys(talkNpc),
           }
         : null,
+      intro: mode === "intro" ? { step: introStep, ...HELL_INTRO[Math.min(introStep, HELL_INTRO.length - 1)] } : null,
       items: [...new Set(items)].map((id) => ({
         id,
         name: ITEM[id].name,
@@ -1217,7 +1237,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       xpNeed: level * 36,
       meleeCd,
       dodgeCd,
-      combat: heroId === "aldric" && mode !== "menu"
+      combat: heroId === "aldric" && mode !== "menu" && mode !== "intro"
         ? {
             combo: comboT > 0 ? comboStep + 1 : 0,
             window: comboT,
@@ -1422,7 +1442,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function persistGame(force = false) {
-    if (mode === "menu") return;
+    if (mode === "menu" || mode === "intro") return;
     const now = Date.now();
     if (!force && now - lastSavedAt < 5000) return;
     const save: GameSave = {
@@ -1720,9 +1740,9 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function reset(id: HeroId) {
     const h = HEROES[id];
     heroId = id;
-    map = "shoal";
-    px = SPAWN.shoal.c * TILE + 16;
-    py = SPAWN.shoal.r * TILE + 16;
+    map = "hell";
+    px = SPAWN.hell.c * TILE + 16;
+    py = SPAWN.hell.r * TILE + 16;
     vx = 0;
     vy = 0;
     dir = 0;
@@ -1739,6 +1759,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     levelFxT = 0;
     skillFlashFrame = -1;
     skillFlashT = 0;
+    introStep = 0;
+    devilFade = 0;
     maxHp = h.hp;
     hp = h.hp;
     maxMp = h.mp;
@@ -1777,10 +1799,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     campDefense = { active: false, wave: 0, hp: 60, maxHp: 60, nextWave: 0, towerCd: 0, day: 1, wins: 0 };
     talkNpc = null;
     lastAsk = "";
-    mode = "play";
+    mode = "intro";
     log.length = 0;
-    log.push(`${h.name} приходит в себя на Острове Трёх досок. На тебе только морская соль и бинты.`);
-    log.push("Осмотри разбитый сундук у западной кромки. Всё, с чем можно взаимодействовать, отмечено руной.");
+    log.push(`${h.name} приходит в себя в приёмной нижнего мира. На стойке лежит дело с единственным обвинением: «слишком добрый».`);
+    log.push("Дьявол собирается провести собеседование. Оно сразу идёт не по плану.");
     cam.x = px;
     cam.y = py;
     sparks.length = 0;
@@ -1807,6 +1829,28 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     time = 0;
     tideCycle = 0;
     for (const s of h.spells) cds[s] = 0;
+  }
+
+  function nextIntro() {
+    if (mode !== "intro") return;
+    if (introStep < HELL_INTRO.length - 1) {
+      introStep += 1;
+      if (introStep === 2) audio.devilLaugh();
+      else audio.talk();
+      emit(true);
+      return;
+    }
+    mode = "play";
+    flags.add("hellDevilGone");
+    devilFade = 1.45;
+    const devilX = 24 * TILE + 16;
+    const devilY = 9 * TILE + 16;
+    addMagic("sigil", devilX, devilY, "#df4d31", 56, 1.15);
+    addMagic("wave", devilX, devilY, "#f07a42", 72, 1.05);
+    burst(devilX, devilY, "#e05232", 42);
+    audio.devilLaugh();
+    say("ХА-ХА-ХА! Дьявол сворачивается в дым. Внизу открывается единственный выход — прямо к морю.");
+    emit(true);
   }
 
   function tileC() {
@@ -3182,6 +3226,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       emit(true);
       return;
     }
+    const from = map;
     map = ex.to;
     px = ex.tc * TILE + 16;
     py = ex.tr * TILE + 16;
@@ -3189,6 +3234,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     cam.y = py;
     exitLock = 0.6;
     say(PLACE[map]);
+    if (from === "hell") {
+      flags.add("hellEscape");
+      log.push("Дьявольский разлом выплюнул Добряка на берег без золота, доспеха и даже приличного объяснения.");
+      say("Приговор исполнен: помогай всем бесплатно. Для начала — не умри на Острове Трёх досок.");
+      addMagic("wave", px, py, "#d85038", 46, 0.75);
+      burst(px, py, "#e16b42", 28);
+      audio.spell();
+    }
     if (map === "keep") {
       flags.add("keep");
       stones.add("keep");
@@ -3202,6 +3255,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function sim(dt: number) {
+    if (mode === "intro") {
+      time += dt;
+      audio.setAmbience("hell");
+      return;
+    }
     if (mode !== "play") {
       vx = 0;
       vy = 0;
@@ -3234,6 +3292,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     levelFxT = Math.max(0, levelFxT - dt);
     skillFlashT = Math.max(0, skillFlashT - dt);
     if (skillFlashT <= 0) skillFlashFrame = -1;
+    devilFade = Math.max(0, devilFade - dt);
     iframe = Math.max(0, iframe - dt);
     goldFlash = Math.max(0, goldFlash - dt * 1.8);
     if (map === "keep" && built.has("hearth")) {
@@ -3241,6 +3300,8 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (Math.random() < dt * 2.2) audio.crackle();
     } else if (map === "inn" || (map === "shoal" && Math.hypot(SHOAL_BAR.c * TILE + 16 - px, SHOAL_BAR.r * TILE + 16 - py) < 104)) {
       audio.setAmbience("tavern");
+    } else if (map === "hell") {
+      audio.setAmbience("hell");
     } else if (map === "dungeon" || map === "crypt" || map === "grotto") {
       audio.setAmbience("dungeon");
     } else if (map === "strait") {
@@ -4276,8 +4337,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const dark = map === "dungeon" || map === "crypt" || map === "grotto";
     const tide = tideState();
 
-    for (let r = r0; r < r1; r++) {
-      for (let c = c0; c < c1; c++) {
+    if (map === "hell") {
+      const origin = wrld(0, 0);
+      blit(imgs["hell-reception-v1"], origin.x, origin.y, size.cols * TILE, size.rows * TILE);
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.globalAlpha = 0.035 + Math.sin(time * 2.7) * 0.015;
+      ctx.fillStyle = "#db3e22";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.restore();
+    } else {
+      for (let r = r0; r < r1; r++) {
+        for (let c = c0; c < c1; c++) {
         const s = wrld(c * TILE, r * TILE);
         const tile = map === "strait" && grid[r][c] === "M" ? "~" : grid[r][c];
         blit(cellImg(tile, map), s.x, s.y, TILE, TILE);
@@ -4310,6 +4381,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
             ctx.fillStyle = "rgba(4,4,8,0.45)";
             ctx.fillRect(s.x, s.y, TILE, TILE);
           }
+        }
         }
       }
     }
@@ -4693,6 +4765,41 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         ctx.textAlign = "center";
         ctx.fillText(n.name, s.x + 18, s.y - 4);
         ctx.textAlign = "left";
+      }
+    }
+
+    if (map === "hell") {
+      const showDevil = mode === "intro" || devilFade > 0;
+      if (showDevil) {
+        const fade = mode === "intro" ? 1 : Math.min(1, devilFade / 1.45);
+        const drift = mode === "intro" ? Math.sin(time * 2.4) * 2 : (1 - fade) * -54;
+        const devilSize = 218;
+        const devil = wrld(24 * TILE + 16 - devilSize / 2, 9 * TILE + 24 - devilSize * 0.78 + drift);
+        const frame = mode === "intro" ? HELL_INTRO[Math.min(introStep, HELL_INTRO.length - 1)].devilFrame : 3;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.filter = `drop-shadow(0 16px 10px rgba(0,0,0,.72)) drop-shadow(0 0 ${12 + (1 - fade) * 24}px rgba(227,72,40,.75))`;
+        sheetGrid(imgs["devil-broker-v1"], frame, 2, 2, devil.x, devil.y, devilSize);
+        ctx.restore();
+      }
+      if (mode === "play") {
+        const gateX = 24 * TILE + 16;
+        const gateY = 30 * TILE + 12;
+        const gate = wrld(gateX, gateY);
+        ctx.save();
+        ctx.translate(gate.x, gate.y);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = `rgba(243,92,54,${0.68 + Math.sin(time * 7) * 0.18})`;
+        ctx.shadowColor = "#e24b2e";
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = 3;
+        for (let ring = 0; ring < 3; ring++) {
+          ctx.beginPath();
+          ctx.ellipse(0, ring * -5, 30 + ring * 9, 10 + ring * 3, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+        drawWorldPrompt(gateX, gateY - 18, "ВОН ИЗ АДА · начать путь", true);
       }
     }
 
@@ -5662,6 +5769,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       lastAsk = "";
       emit(true);
     },
+    nextIntro,
     keyword: doKeyword,
     attack,
     dodge,
