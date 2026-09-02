@@ -1,0 +1,81 @@
+name: Repair clean build
+
+on:
+  push:
+    branches:
+      - "automation/browser-preview-*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Regenerate dependency lock
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Persist repaired lock
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is already clean"
+            exit 0
+          fi
+          git config user.name "oathbound-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Repair dependency lock for clean builds"
+          git push
+
+      - name: Run clean checks and build
+        shell: bash
+        run: |
+          mkdir -p build-diagnostics
+          set +e
+
+          node --input-type=module <<'NODE' > build-diagnostics/versions.txt
+          import lock from './package-lock.json' with { type: 'json' };
+          const names = ['vite', 'react', 'react-dom', '@tanstack/react-start', '@tanstack/router-plugin', 'lru-cache'];
+          for (const name of names) {
+            const entry = lock.packages?.[`node_modules/${name}`];
+            console.log(`${name}: ${entry?.version ?? 'missing'}`);
+          }
+          NODE
+
+          npm ci --no-audit --no-fund > build-diagnostics/01-ci.log 2>&1
+          echo "ci=$?" >> build-diagnostics/status.txt
+
+          npm run typecheck > build-diagnostics/02-typecheck.log 2>&1
+          echo "typecheck=$?" >> build-diagnostics/status.txt
+
+          npm test > build-diagnostics/03-tests.log 2>&1
+          echo "tests=$?" >> build-diagnostics/status.txt
+
+          npm run lint > build-diagnostics/04-lint.log 2>&1
+          echo "lint=$?" >> build-diagnostics/status.txt
+
+          VITE_AUTH_ENABLED=false npm run build:dev > build-diagnostics/05-build.log 2>&1
+          echo "build=$?" >> build-diagnostics/status.txt
+
+          find dist .output -maxdepth 4 -type f -printf '%p\t%s bytes\n' 2>/dev/null | sort > build-diagnostics/output-files.txt
+          cp package-lock.json build-diagnostics/package-lock.generated.json
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oathbound-build-repair
+          path: build-diagnostics
+          if-no-files-found: error
+          retention-days: 7
