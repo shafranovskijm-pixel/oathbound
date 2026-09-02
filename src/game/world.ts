@@ -1,5 +1,5 @@
 export const TILE = 32;
-export type MapId = "shoal" | "strait" | "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle" | "grotto";
+export type MapId = "hell" | "shoal" | "strait" | "over" | "town" | "hall" | "inn" | "dungeon" | "crypt" | "keep" | "ship" | "isle" | "grotto";
 export type TileCh = string;
 
 function parse(raw: string): TileCh[][] {
@@ -309,7 +309,27 @@ function buildGrotto(): TileCh[][] {
   return t;
 }
 
+function buildHell(): TileCh[][] {
+  const cols = 48;
+  const rows = 32;
+  const t: TileCh[][] = Array.from({ length: rows }, () => Array<TileCh>(cols).fill("W"));
+  for (let r = 4; r < rows - 1; r++) {
+    for (let c = 7; c < cols - 7; c++) t[r][c] = "d";
+  }
+  for (let r = 7; r < 25; r++) {
+    for (let c = 2; c <= 5; c++) t[r][c] = "L";
+    for (let c = cols - 6; c <= cols - 3; c++) t[r][c] = "L";
+  }
+  for (let r = 18; r < rows; r++) {
+    for (let c = 20; c <= 27; c++) t[r][c] = "d";
+  }
+  for (let c = 14; c <= 33; c++) t[8][c] = "d";
+  t[31][24] = "p";
+  return t;
+}
+
 export const MAPS: Record<MapId, TileCh[][]> = {
+  hell: buildHell(),
   shoal: buildShoal(),
   strait: buildStrait(),
   over: buildOver(),
@@ -325,6 +345,7 @@ export const MAPS: Record<MapId, TileCh[][]> = {
 };
 
 export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
+  hell: { cols: MAPS.hell[0].length, rows: MAPS.hell.length },
   shoal: { cols: MAPS.shoal[0].length, rows: MAPS.shoal.length },
   strait: { cols: MAPS.strait[0].length, rows: MAPS.strait.length },
   over: { cols: MAPS.over[0].length, rows: MAPS.over.length },
@@ -340,6 +361,7 @@ export const MAP_SIZE: Record<MapId, { cols: number; rows: number }> = {
 };
 
 export const SPAWN: Record<MapId, { c: number; r: number }> = {
+  hell: { c: 24, r: 26 },
   shoal: { c: 6, r: 13 },
   strait: { c: 2, r: 12 },
   over: { c: 14, r: 22 },
@@ -355,6 +377,7 @@ export const SPAWN: Record<MapId, { c: number; r: number }> = {
 };
 
 export const PLACE: Record<MapId, string> = {
+  hell: "Приёмная нижнего мира",
   shoal: "Остров Трёх досок",
   strait: "Пролив Семи осколков",
   over: "Дикие земли",
@@ -370,6 +393,7 @@ export const PLACE: Record<MapId, string> = {
 };
 
 export const EXITS: Record<MapId, { c: number; r: number; to: MapId; tc: number; tr: number }[]> = {
+  hell: [{ c: 24, r: 31, to: "shoal", tc: 6, tr: 13 }],
   shoal: [],
   strait: [],
   over: [

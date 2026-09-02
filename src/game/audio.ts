@@ -1,4 +1,4 @@
-export type AmbienceKind = "shore" | "sea" | "storm" | "tavern" | "fire" | "dungeon" | "none";
+export type AmbienceKind = "shore" | "sea" | "storm" | "tavern" | "fire" | "dungeon" | "hell" | "none";
 
 export class GameAudio {
   private ctx: AudioContext | null = null;
@@ -87,6 +87,10 @@ export class GameAudio {
           if (kind === "fire" || kind === "tavern") {
             sample = white * 0.13 + low * 0.24;
             if (Math.random() < 0.0015) sample += Math.random() * 0.9;
+          } else if (kind === "hell") {
+            const furnace = Math.sin(phase * 31 + channel * 0.9) * 0.035;
+            const chain = Math.sin(phase * 2.1) > 0.998 ? white * 0.42 : 0;
+            sample = slow * 1.25 + low * 0.42 + furnace + chain;
           } else if (kind === "dungeon") {
             sample = slow * 1.7 + Math.sin(phase * 47 + channel) * 0.035;
           } else {
@@ -104,9 +108,9 @@ export class GameAudio {
     src.loop = true;
     const filter = this.ctx.createBiquadFilter();
     filter.type = kind === "fire" || kind === "tavern" ? "highpass" : "lowpass";
-    filter.frequency.value = kind === "fire" ? 260 : kind === "tavern" ? 180 : kind === "storm" ? 620 : kind === "dungeon" ? 210 : 470;
+    filter.frequency.value = kind === "fire" ? 260 : kind === "tavern" ? 180 : kind === "storm" ? 620 : kind === "hell" ? 270 : kind === "dungeon" ? 210 : 470;
     const gain = this.ctx.createGain();
-    gain.gain.value = kind === "storm" ? 0.24 : kind === "fire" ? 0.22 : kind === "tavern" ? 0.12 : kind === "dungeon" ? 0.14 : 0.16;
+    gain.gain.value = kind === "storm" ? 0.24 : kind === "fire" ? 0.22 : kind === "tavern" ? 0.12 : kind === "hell" ? 0.18 : kind === "dungeon" ? 0.14 : 0.16;
     src.connect(filter);
     filter.connect(gain);
     gain.connect(this.music);
@@ -159,6 +163,9 @@ export class GameAudio {
       this.chord([196, 246.9, 293.7], 0.55, 0.035);
     } else if (this.ambKind === "dungeon") {
       this.tone(124, 0.8, "sine", 0.024, 88);
+    } else if (this.ambKind === "hell") {
+      this.tone(92, 0.92, "sawtooth", 0.021, 61);
+      this.noiseBurst(0.18, 0.025, 870, true);
     }
   }
 
@@ -201,6 +208,11 @@ export class GameAudio {
   }
   talk() {
     this.tone(260, 0.07, "triangle", 0.055, 310);
+  }
+  devilLaugh() {
+    this.tone(138, 0.34, "sawtooth", 0.085, 92);
+    this.tone(196, 0.24, "triangle", 0.052, 136);
+    this.noiseBurst(0.36, 0.045, 430);
   }
   hit() {
     this.tone(90, 0.11, "sawtooth", 0.11, 48);
