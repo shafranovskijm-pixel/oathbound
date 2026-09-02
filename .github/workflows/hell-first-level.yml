@@ -1,0 +1,275 @@
+name: Build first hell level
+
+on:
+  push:
+    branches:
+      - "codex/hell-first-level"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-level:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/hell-first-level
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore deterministic level builders
+        shell: bash
+        run: |
+          base64 -d scripts/.ci-apply-hell.b64 | gzip -d > scripts/apply_hell_first_level.py
+          base64 -d scripts/.ci-generate-hell-assets.b64 | gzip -d > scripts/generate_hell_level_assets.py
+          python -m py_compile scripts/apply_hell_first_level.py scripts/generate_hell_level_assets.py
+
+      - name: Build the first hell level
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-cache-dir pillow
+          python scripts/apply_hell_first_level.py
+          python scripts/generate_hell_level_assets.py
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          for name, size in {
+              'hell-reception-v1.png': (1536, 1536),
+              'hell-stations-v1.png': (384, 256),
+              'hell-imp-v1.png': (512, 128),
+          }.items():
+              path = Path('public/sprites') / name
+              assert path.exists(), path
+              with Image.open(path) as image:
+                  assert image.size == size, (name, image.size)
+          PY
+
+      - name: Repair dependency lock and install
+        shell: bash
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+
+      - name: Validate game
+        shell: bash
+        env:
+          VITE_AUTH_ENABLED: "false"
+        run: |
+          npm run typecheck
+          npm test
+          npm run lint
+          git diff --check
+          npm run build:dev
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start production browser build
+        shell: bash
+        run: |
+          python3 -m http.server 8080 --directory dist/client > /tmp/oathbound-level1-server.log 2>&1 &
+          echo $! > /tmp/oathbound-level1-server.pid
+          node --input-type=module <<'NODE'
+          const deadline = Date.now() + 60000;
+          while (Date.now() < deadline) {
+            try {
+              const response = await fetch('http://127.0.0.1:8080/?__test=1');
+              if (response.ok) process.exit(0);
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          process.exit(1);
+          NODE
+
+      - name: Play the complete first level in Chromium
+        shell: bash
+        run: |
+          mkdir -p browser-preview/screens browser-preview/browser-build
+          cp -R dist/client/. browser-preview/browser-build/
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          import { writeFile } from 'node:fs/promises';
+
+          const browser = await chromium.launch({ headless: true });
+          const errors = [];
+          const log = [];
+
+          async function diagnostics(page, label) {
+            page.on('console', (message) => {
+              if (message.type() === 'error') errors.push(`${label} console: ${message.text()}`);
+            });
+            page.on('pageerror', (error) => errors.push(`${label} pageerror: ${error.message}`));
+            page.on('requestfailed', (request) => errors.push(`${label} requestfailed: ${request.url()} :: ${request.failure()?.errorText}`));
+          }
+
+          async function snapshot(page) {
+            return page.evaluate(() => window.__controlsTest?.getSnapshot?.());
+          }
+
+          async function waitForSnapshot(page, condition, label) {
+            await page.waitForFunction(
+              (expected) => {
+                const value = window.__controlsTest?.getSnapshot?.();
+                if (!value) return false;
+                if (expected.mode && value.mode !== expected.mode) return false;
+                if (expected.map && value.you?.map !== expected.map) return false;
+                if (expected.caseId && value.hellCase?.id !== expected.caseId) return false;
+                if (typeof expected.enemies === 'number' && value.hellProgress?.enemies !== expected.enemies) return false;
+                if (expected.portal && !/портал|выход/i.test(value.hellProgress?.label || '')) return false;
+                return true;
+              },
+              condition,
+              { timeout: 15000 },
+            );
+            log.push(label);
+          }
+
+          const desktop = await browser.newContext({
+            viewport: { width: 1440, height: 1000 },
+            deviceScaleFactor: 1,
+            locale: 'ru-RU',
+          });
+          const page = await desktop.newPage();
+          await diagnostics(page, 'desktop');
+          await page.goto('http://127.0.0.1:8080/?__test=1', { waitUntil: 'networkidle', timeout: 90000 });
+          await page.screenshot({ path: 'browser-preview/screens/01-menu.png', fullPage: true });
+
+          const start = page.getByRole('button', { name: /Начать с адского собеседования/i });
+          await start.waitFor({ state: 'visible' });
+          await start.click();
+          await page.waitForTimeout(650);
+          await page.screenshot({ path: 'browser-preview/screens/02-dialogue.png', fullPage: true });
+
+          for (let i = 0; i < 4; i += 1) {
+            const next = page.locator('.hell-dialogue button');
+            await next.waitFor({ state: 'visible' });
+            await next.click();
+            await page.waitForTimeout(450);
+          }
+          await waitForSnapshot(page, { mode: 'play', map: 'hell' }, 'Entered playable hell map');
+          await page.screenshot({ path: 'browser-preview/screens/03-level-start.png', fullPage: true });
+
+          const stages = [
+            { id: 'registry', c: 24, r: 18, option: 'sign' },
+            { id: 'contract', c: 12, r: 24, option: 'free' },
+            { id: 'armory', c: 36, r: 24, option: 'give' },
+            { id: 'donation', c: 12, r: 35, option: 'morale' },
+            { id: 'club', c: 36, r: 35, option: 'bread' },
+            { id: 'audit', c: 24, r: 41, option: 'fight' },
+          ];
+
+          for (const [index, stage] of stages.entries()) {
+            const teleported = await page.evaluate(({ c, r }) => window.__controlsTest?.teleportHell?.(c, r), stage);
+            if (!teleported) throw new Error(`Cannot teleport to ${stage.id}`);
+            await page.evaluate(() => window.__controlsTest?.interact?.());
+            await waitForSnapshot(page, { mode: 'hellcase', caseId: stage.id }, `Opened ${stage.id}`);
+            if (stage.id === 'contract') {
+              await page.screenshot({ path: 'browser-preview/screens/04-contract.png', fullPage: true });
+            }
+            if (stage.id === 'donation') {
+              await page.screenshot({ path: 'browser-preview/screens/05-donations.png', fullPage: true });
+            }
+            if (stage.id === 'club') {
+              await page.screenshot({ path: 'browser-preview/screens/06-club.png', fullPage: true });
+            }
+            await page.evaluate((option) => window.__controlsTest?.chooseHell?.(option), stage.option);
+            await waitForSnapshot(page, { mode: 'play' }, `Completed ${stage.id}`);
+            await page.waitForTimeout(250);
+            if (index < stages.length - 1) {
+              const progress = await snapshot(page);
+              if (!progress?.hellProgress) throw new Error(`Missing hell progress after ${stage.id}`);
+            }
+          }
+
+          await waitForSnapshot(page, { enemies: 3 }, 'Three audit imps spawned');
+          await page.screenshot({ path: 'browser-preview/screens/07-audit-fight.png', fullPage: true });
+          await page.evaluate(() => window.__controlsTest?.defeatHellAudit?.());
+          await waitForSnapshot(page, { enemies: 0, portal: true }, 'Audit defeated and portal opened');
+          await page.screenshot({ path: 'browser-preview/screens/08-portal-open.png', fullPage: true });
+
+          const exitReached = await page.evaluate(() => window.__controlsTest?.teleportHell?.(24, 46));
+          if (!exitReached) throw new Error('Cannot reach exit portal');
+          await page.evaluate(() => window.__controlsTest?.interact?.());
+          await waitForSnapshot(page, { mode: 'play', map: 'shoal' }, 'Exited to the Island of Three Boards');
+          await page.waitForTimeout(700);
+          await page.screenshot({ path: 'browser-preview/screens/09-island-transition.png', fullPage: true });
+
+          const final = await snapshot(page);
+          log.push(`Final map: ${final?.you?.map}`);
+          log.push(`Final place: ${final?.place}`);
+          await desktop.close();
+
+          const mobile = await browser.newContext({
+            viewport: { width: 390, height: 844 },
+            deviceScaleFactor: 1,
+            isMobile: true,
+            hasTouch: true,
+            locale: 'ru-RU',
+          });
+          const mobilePage = await mobile.newPage();
+          await diagnostics(mobilePage, 'mobile');
+          await mobilePage.goto('http://127.0.0.1:8080/?__test=1', { waitUntil: 'networkidle', timeout: 90000 });
+          await mobilePage.screenshot({ path: 'browser-preview/screens/10-menu-mobile.png', fullPage: true });
+          await mobile.close();
+
+          await writeFile(
+            'browser-preview/diagnostics.txt',
+            [
+              `errors: ${errors.length}`,
+              `commit before persistence: ${process.env.GITHUB_SHA}`,
+              ...log,
+              ...errors,
+            ].join('\n'),
+          );
+          await browser.close();
+          if (errors.length) throw new Error(errors.join('\n'));
+          NODE
+          cp /tmp/oathbound-level1-server.log browser-preview/server.log || true
+
+      - name: Persist the completed level
+        shell: bash
+        run: |
+          rm -f scripts/apply_hell_first_level.py scripts/generate_hell_level_assets.py
+          git rm scripts/.ci-apply-hell.b64 scripts/.ci-generate-hell-assets.b64
+          git config user.name "oathbound-level-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            package-lock.json \
+            public/sprites/hell-reception-v1.png \
+            public/sprites/hell-stations-v1.png \
+            public/sprites/hell-imp-v1.png \
+            scripts/island-content.test.mjs \
+            src/components/oathbound.tsx \
+            src/game/content.ts \
+            src/game/engine.ts \
+            src/game/save.ts \
+            src/game/world.ts \
+            src/styles.css
+          git rm .github/workflows/hell-first-level.yml
+          git diff --cached --check
+          git commit -m "Первый игровой уровень ада"
+          git push origin HEAD:codex/hell-first-level
+          git rev-parse HEAD > browser-preview/feature-commit.txt
+
+      - name: Upload playable build and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oathbound-first-hell-level
+          path: browser-preview
+          if-no-files-found: error
+          retention-days: 14
