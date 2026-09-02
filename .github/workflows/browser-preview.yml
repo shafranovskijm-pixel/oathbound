@@ -24,7 +24,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -78,10 +78,10 @@ jobs:
           await page.screenshot({ path: 'browser-preview/02-intro-first-line.png', fullPage: true });
 
           const next = page.locator('.hell-dialogue button');
-          for (let step = 3; step <= 5; step += 1) {
+          for (let step = 3; step <= 6; step += 1) {
             if (!(await next.isVisible().catch(() => false))) break;
             await next.click();
-            await page.waitForTimeout(600);
+            await page.waitForTimeout(650);
             await page.screenshot({ path: `browser-preview/0${step}-intro-or-level.png`, fullPage: true });
           }
 
@@ -100,7 +100,9 @@ jobs:
 
       - name: Include server log
         if: always()
-        run: cp /tmp/oathbound-vite.log browser-preview/server.log || true
+        run: |
+          mkdir -p browser-preview
+          cp /tmp/oathbound-vite.log browser-preview/server.log || true
 
       - name: Upload browser preview
         if: always()
