@@ -1,0 +1,112 @@
+name: Browser preview capture
+
+on:
+  push:
+    branches:
+      - "automation/browser-preview-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the game
+        env:
+          VITE_AUTH_ENABLED: "false"
+        run: |
+          npm run dev > /tmp/oathbound-vite.log 2>&1 &
+          echo $! > /tmp/oathbound-vite.pid
+
+      - name: Wait for the game
+        run: |
+          node --input-type=module <<'NODE'
+          const deadline = Date.now() + 120000;
+          while (Date.now() < deadline) {
+            try {
+              const response = await fetch('http://127.0.0.1:8080/');
+              if (response.ok) process.exit(0);
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          process.exit(1);
+          NODE
+
+      - name: Capture browser screens
+        run: |
+          mkdir -p browser-preview
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          import { writeFile } from 'node:fs/promises';
+
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({
+            viewport: { width: 1440, height: 1000 },
+            deviceScaleFactor: 1,
+          });
+          const diagnostics = [];
+          page.on('console', (message) => {
+            if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+          });
+          page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+
+          await page.goto('http://127.0.0.1:8080/', { waitUntil: 'networkidle' });
+          await page.screenshot({ path: 'browser-preview/01-menu.png', fullPage: true });
+
+          const start = page.getByRole('button', { name: /Начать с адского собеседования/i });
+          await start.waitFor({ state: 'visible' });
+          await start.click();
+          await page.waitForTimeout(700);
+          await page.screenshot({ path: 'browser-preview/02-intro-first-line.png', fullPage: true });
+
+          const next = page.locator('.hell-dialogue button');
+          for (let step = 3; step <= 5; step += 1) {
+            if (!(await next.isVisible().catch(() => false))) break;
+            await next.click();
+            await page.waitForTimeout(600);
+            await page.screenshot({ path: `browser-preview/0${step}-intro-or-level.png`, fullPage: true });
+          }
+
+          await writeFile(
+            'browser-preview/diagnostics.txt',
+            [
+              `title: ${await page.title()}`,
+              `url: ${page.url()}`,
+              `viewport: 1440x1000`,
+              `errors: ${diagnostics.length}`,
+              ...diagnostics,
+            ].join('\n'),
+          );
+          await browser.close();
+          NODE
+
+      - name: Include server log
+        if: always()
+        run: cp /tmp/oathbound-vite.log browser-preview/server.log || true
+
+      - name: Upload browser preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oathbound-browser-preview
+          path: browser-preview
+          if-no-files-found: error
+          retention-days: 7
