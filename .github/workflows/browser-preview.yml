@@ -21,88 +21,102 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install isolated Chromium harness
+        run: |
+          mkdir -p /tmp/oathbound-capture
+          cd /tmp/oathbound-capture
+          npm init -y
+          npm install --no-audit --no-fund playwright@1.62.0
+          npx playwright install --with-deps chromium
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Start the game
+      - name: Capture published game
         env:
-          VITE_AUTH_ENABLED: "false"
+          TARGET_URL: "https://oathbound-salt-keel.shafranovskij-m.chatgpt.site/"
         run: |
-          npm run dev > /tmp/oathbound-vite.log 2>&1 &
-          echo $! > /tmp/oathbound-vite.pid
-
-      - name: Wait for the game
-        run: |
-          node --input-type=module <<'NODE'
-          const deadline = Date.now() + 120000;
-          while (Date.now() < deadline) {
-            try {
-              const response = await fetch('http://127.0.0.1:8080/');
-              if (response.ok) process.exit(0);
-            } catch {}
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          }
-          process.exit(1);
-          NODE
-
-      - name: Capture browser screens
-        run: |
-          mkdir -p browser-preview
+          mkdir -p "$GITHUB_WORKSPACE/browser-preview"
+          cd /tmp/oathbound-capture
           node --input-type=module <<'NODE'
           import { chromium } from 'playwright';
           import { writeFile } from 'node:fs/promises';
 
-          const browser = await chromium.launch({ headless: true });
-          const page = await browser.newPage({
-            viewport: { width: 1440, height: 1000 },
-            deviceScaleFactor: 1,
-          });
+          const output = `${process.env.GITHUB_WORKSPACE}/browser-preview`;
           const diagnostics = [];
-          page.on('console', (message) => {
-            if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
-          });
-          page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+          const browser = await chromium.launch({ headless: true });
 
-          await page.goto('http://127.0.0.1:8080/', { waitUntil: 'networkidle' });
-          await page.screenshot({ path: 'browser-preview/01-menu.png', fullPage: true });
+          async function captureDesktop() {
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'ru-RU',
+            });
+            const page = await context.newPage();
+            page.on('console', (message) => {
+              if (message.type() === 'error') diagnostics.push(`desktop console: ${message.text()}`);
+            });
+            page.on('pageerror', (error) => diagnostics.push(`desktop pageerror: ${error.message}`));
+            page.on('requestfailed', (request) => diagnostics.push(`desktop requestfailed: ${request.url()} :: ${request.failure()?.errorText}`));
 
-          const start = page.getByRole('button', { name: /Начать с адского собеседования/i });
-          await start.waitFor({ state: 'visible' });
-          await start.click();
-          await page.waitForTimeout(700);
-          await page.screenshot({ path: 'browser-preview/02-intro-first-line.png', fullPage: true });
+            const response = await page.goto(process.env.TARGET_URL, {
+              waitUntil: 'domcontentloaded',
+              timeout: 90000,
+            });
+            diagnostics.push(`desktop status: ${response?.status() ?? 'no response'}`);
+            await page.waitForTimeout(5000);
+            await page.screenshot({ path: `${output}/01-menu-desktop.png`, fullPage: true });
 
-          const next = page.locator('.hell-dialogue button');
-          for (let step = 3; step <= 6; step += 1) {
-            if (!(await next.isVisible().catch(() => false))) break;
-            await next.click();
-            await page.waitForTimeout(650);
-            await page.screenshot({ path: `browser-preview/0${step}-intro-or-level.png`, fullPage: true });
+            const start = page.getByRole('button', { name: /Начать с адского собеседования/i });
+            const startVisible = await start.isVisible().catch(() => false);
+            diagnostics.push(`start button visible: ${startVisible}`);
+            if (startVisible) {
+              await start.click();
+              await page.waitForTimeout(1000);
+              await page.screenshot({ path: `${output}/02-intro-first-line.png`, fullPage: true });
+
+              const next = page.locator('.hell-dialogue button');
+              for (let step = 3; step <= 7; step += 1) {
+                if (!(await next.isVisible().catch(() => false))) break;
+                await next.click();
+                await page.waitForTimeout(850);
+                await page.screenshot({ path: `${output}/0${step}-intro-or-level.png`, fullPage: true });
+              }
+            }
+
+            diagnostics.push(`desktop title: ${await page.title()}`);
+            diagnostics.push(`desktop final url: ${page.url()}`);
+            await context.close();
           }
 
-          await writeFile(
-            'browser-preview/diagnostics.txt',
-            [
-              `title: ${await page.title()}`,
-              `url: ${page.url()}`,
-              `viewport: 1440x1000`,
-              `errors: ${diagnostics.length}`,
-              ...diagnostics,
-            ].join('\n'),
-          );
-          await browser.close();
-          NODE
+          async function captureMobile() {
+            const context = await browser.newContext({
+              viewport: { width: 390, height: 844 },
+              deviceScaleFactor: 1,
+              isMobile: true,
+              hasTouch: true,
+              locale: 'ru-RU',
+            });
+            const page = await context.newPage();
+            page.on('pageerror', (error) => diagnostics.push(`mobile pageerror: ${error.message}`));
+            const response = await page.goto(process.env.TARGET_URL, {
+              waitUntil: 'domcontentloaded',
+              timeout: 90000,
+            });
+            diagnostics.push(`mobile status: ${response?.status() ?? 'no response'}`);
+            await page.waitForTimeout(5000);
+            await page.screenshot({ path: `${output}/08-menu-mobile.png`, fullPage: true });
+            await context.close();
+          }
 
-      - name: Include server log
-        if: always()
-        run: |
-          mkdir -p browser-preview
-          cp /tmp/oathbound-vite.log browser-preview/server.log || true
+          try {
+            await captureDesktop();
+            await captureMobile();
+          } catch (error) {
+            diagnostics.push(`fatal: ${error?.stack || error}`);
+          } finally {
+            await writeFile(`${output}/diagnostics.txt`, diagnostics.join('\n'));
+            await browser.close();
+          }
+          NODE
 
       - name: Upload browser preview
         if: always()
