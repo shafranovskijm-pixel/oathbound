@@ -12,7 +12,7 @@ permissions:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,21 +21,43 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Install isolated Chromium harness
+      - name: Repair lock and install dependencies
         run: |
-          mkdir -p /tmp/oathbound-capture
-          cd /tmp/oathbound-capture
-          npm init -y
-          npm install --no-audit --no-fund playwright@1.62.0
-          npx playwright install --with-deps chromium
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
 
-      - name: Capture published game
+      - name: Build latest game
         env:
-          TARGET_URL: "https://oathbound-salt-keel.shafranovskij-m.chatgpt.site/"
+          VITE_AUTH_ENABLED: "false"
+        run: npm run build:dev
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start static build
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/browser-preview"
-          cd /tmp/oathbound-capture
+          python3 -m http.server 8080 --directory dist/client > /tmp/oathbound-static.log 2>&1 &
+          echo $! > /tmp/oathbound-static.pid
+          node --input-type=module <<'NODE'
+          const deadline = Date.now() + 60000;
+          while (Date.now() < deadline) {
+            try {
+              const response = await fetch('http://127.0.0.1:8080/');
+              if (response.ok) process.exit(0);
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          process.exit(1);
+          NODE
+
+      - name: Capture current source and published site
+        env:
+          CURRENT_URL: "http://127.0.0.1:8080/"
+          PUBLISHED_URL: "https://oathbound-salt-keel.shafranovskij-m.chatgpt.site/"
+        run: |
+          mkdir -p browser-preview/current browser-preview/published
           node --input-type=module <<'NODE'
           import { chromium } from 'playwright';
           import { writeFile } from 'node:fs/promises';
@@ -44,50 +66,49 @@ jobs:
           const diagnostics = [];
           const browser = await chromium.launch({ headless: true });
 
-          async function captureDesktop() {
+          async function attachDiagnostics(page, label) {
+            page.on('console', (message) => {
+              if (message.type() === 'error') diagnostics.push(`${label} console: ${message.text()}`);
+            });
+            page.on('pageerror', (error) => diagnostics.push(`${label} pageerror: ${error.message}`));
+            page.on('requestfailed', (request) => diagnostics.push(`${label} requestfailed: ${request.url()} :: ${request.failure()?.errorText}`));
+          }
+
+          async function captureCurrentDesktop() {
             const context = await browser.newContext({
               viewport: { width: 1440, height: 1000 },
               deviceScaleFactor: 1,
               locale: 'ru-RU',
             });
             const page = await context.newPage();
-            page.on('console', (message) => {
-              if (message.type() === 'error') diagnostics.push(`desktop console: ${message.text()}`);
-            });
-            page.on('pageerror', (error) => diagnostics.push(`desktop pageerror: ${error.message}`));
-            page.on('requestfailed', (request) => diagnostics.push(`desktop requestfailed: ${request.url()} :: ${request.failure()?.errorText}`));
-
-            const response = await page.goto(process.env.TARGET_URL, {
-              waitUntil: 'domcontentloaded',
-              timeout: 90000,
-            });
-            diagnostics.push(`desktop status: ${response?.status() ?? 'no response'}`);
-            await page.waitForTimeout(5000);
-            await page.screenshot({ path: `${output}/01-menu-desktop.png`, fullPage: true });
+            await attachDiagnostics(page, 'current desktop');
+            const response = await page.goto(process.env.CURRENT_URL, { waitUntil: 'networkidle', timeout: 90000 });
+            diagnostics.push(`current desktop status: ${response?.status() ?? 'no response'}`);
+            await page.waitForTimeout(1200);
+            await page.screenshot({ path: `${output}/current/01-menu-desktop.png`, fullPage: true });
 
             const start = page.getByRole('button', { name: /Начать с адского собеседования/i });
             const startVisible = await start.isVisible().catch(() => false);
-            diagnostics.push(`start button visible: ${startVisible}`);
+            diagnostics.push(`current start button visible: ${startVisible}`);
             if (startVisible) {
               await start.click();
-              await page.waitForTimeout(1000);
-              await page.screenshot({ path: `${output}/02-intro-first-line.png`, fullPage: true });
+              await page.waitForTimeout(900);
+              await page.screenshot({ path: `${output}/current/02-intro-1.png`, fullPage: true });
 
               const next = page.locator('.hell-dialogue button');
-              for (let step = 3; step <= 7; step += 1) {
+              for (let shot = 3; shot <= 7; shot += 1) {
                 if (!(await next.isVisible().catch(() => false))) break;
                 await next.click();
-                await page.waitForTimeout(850);
-                await page.screenshot({ path: `${output}/0${step}-intro-or-level.png`, fullPage: true });
+                await page.waitForTimeout(800);
+                await page.screenshot({ path: `${output}/current/0${shot}-intro-or-level.png`, fullPage: true });
               }
             }
-
-            diagnostics.push(`desktop title: ${await page.title()}`);
-            diagnostics.push(`desktop final url: ${page.url()}`);
+            diagnostics.push(`current desktop title: ${await page.title()}`);
+            diagnostics.push(`current desktop final url: ${page.url()}`);
             await context.close();
           }
 
-          async function captureMobile() {
+          async function captureCurrentMobile() {
             const context = await browser.newContext({
               viewport: { width: 390, height: 844 },
               deviceScaleFactor: 1,
@@ -96,20 +117,35 @@ jobs:
               locale: 'ru-RU',
             });
             const page = await context.newPage();
-            page.on('pageerror', (error) => diagnostics.push(`mobile pageerror: ${error.message}`));
-            const response = await page.goto(process.env.TARGET_URL, {
-              waitUntil: 'domcontentloaded',
-              timeout: 90000,
+            await attachDiagnostics(page, 'current mobile');
+            const response = await page.goto(process.env.CURRENT_URL, { waitUntil: 'networkidle', timeout: 90000 });
+            diagnostics.push(`current mobile status: ${response?.status() ?? 'no response'}`);
+            await page.waitForTimeout(1000);
+            await page.screenshot({ path: `${output}/current/08-menu-mobile.png`, fullPage: true });
+            await context.close();
+          }
+
+          async function capturePublished() {
+            const context = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              deviceScaleFactor: 1,
+              locale: 'ru-RU',
             });
-            diagnostics.push(`mobile status: ${response?.status() ?? 'no response'}`);
-            await page.waitForTimeout(5000);
-            await page.screenshot({ path: `${output}/08-menu-mobile.png`, fullPage: true });
+            const page = await context.newPage();
+            await attachDiagnostics(page, 'published');
+            const response = await page.goto(process.env.PUBLISHED_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+            diagnostics.push(`published status: ${response?.status() ?? 'no response'}`);
+            await page.waitForTimeout(4500);
+            await page.screenshot({ path: `${output}/published/01-menu-desktop.png`, fullPage: true });
+            diagnostics.push(`published has Добряк: ${await page.getByText('ДОБРЯК', { exact: true }).isVisible().catch(() => false)}`);
+            diagnostics.push(`published title: ${await page.title()}`);
             await context.close();
           }
 
           try {
-            await captureDesktop();
-            await captureMobile();
+            await captureCurrentDesktop();
+            await captureCurrentMobile();
+            await capturePublished();
           } catch (error) {
             diagnostics.push(`fatal: ${error?.stack || error}`);
           } finally {
@@ -117,6 +153,10 @@ jobs:
             await browser.close();
           }
           NODE
+
+      - name: Include static server log
+        if: always()
+        run: cp /tmp/oathbound-static.log browser-preview/static-server.log || true
 
       - name: Upload browser preview
         if: always()
