@@ -34,13 +34,24 @@ export const SPELLS: Record<SpellId, SpellDef> = {
   mark: { id: "mark", name: "Метка", key: "3", cost: 5, cd: 4, desc: "Следующий удар ×2." },
 };
 
-export const TALENTS: Record<TalentId, { name: string; desc: string; hero: HeroId }> = {
-  iron: { name: "Железная шкура", desc: "+3 брони.", hero: "aldric" },
-  blood: { name: "Жажда", desc: "Ближний бой лечит 2 HP.", hero: "aldric" },
-  wide: { name: "Широкий клинок", desc: "Дальше и шире удар.", hero: "aldric" },
-  holy: { name: "Святое жало", desc: "Кара сильнее и оглушает.", hero: "aldric" },
-  stamina: { name: "Жила", desc: "+14 макс. HP.", hero: "aldric" },
-  whirl: { name: "Вихрь", desc: "Обычный удар бьёт вокруг.", hero: "aldric" },
+export type TalentPath = "shield" | "blade" | "oath";
+export type TalentDef = {
+  name: string;
+  desc: string;
+  hero: HeroId;
+  path?: TalentPath;
+  tier?: 1 | 2;
+  icon?: 0 | 1 | 2 | 3;
+  requires?: TalentId;
+};
+
+export const TALENTS: Record<TalentId, TalentDef> = {
+  iron: { name: "Синий бастион", desc: "+3 брони. Щит выдерживает заметно больше.", hero: "aldric", path: "shield", tier: 1, icon: 2 },
+  stamina: { name: "Несокрушимый", desc: "+14 макс. HP. «Страж» держится дольше.", hero: "aldric", path: "shield", tier: 2, icon: 2, requires: "iron" },
+  wide: { name: "Длинная дуга", desc: "Удар дальше и шире. Окно комбо длиннее.", hero: "aldric", path: "blade", tier: 1, icon: 0 },
+  whirl: { name: "Третий звон", desc: "Финал комбо и обычный удар бьют вокруг.", hero: "aldric", path: "blade", tier: 2, icon: 3, requires: "wide" },
+  holy: { name: "Золотая кара", desc: "«Кара» сильнее и надолго оглушает.", hero: "aldric", path: "oath", tier: 1, icon: 1 },
+  blood: { name: "Живая клятва", desc: "Каждый ближний удар возвращает 2 HP.", hero: "aldric", path: "oath", tier: 2, icon: 1, requires: "holy" },
   mind: { name: "Ясный ум", desc: "+10 макс. маны.", hero: "vessa" },
   pierce: { name: "Пронзание", desc: "Стрела проходит цель.", hero: "vessa" },
   freeze: { name: "Стужа", desc: "Иней замораживает дольше.", hero: "vessa" },
@@ -53,6 +64,12 @@ export const TALENTS: Record<TalentId, { name: string; desc: string; hero: HeroI
   blink: { name: "Длинный рывок", desc: "Рывок дальше.", hero: "kael" },
   luck: { name: "Находка", desc: "Больше золота с врагов.", hero: "kael" },
   twin: { name: "Двойной", desc: "20% второй выстрел.", hero: "kael" },
+};
+
+export const ALDRIC_TALENT_PATHS: Record<TalentPath, readonly [TalentId, TalentId]> = {
+  shield: ["iron", "stamina"],
+  blade: ["wide", "whirl"],
+  oath: ["holy", "blood"],
 };
 
 export type HeroDef = {

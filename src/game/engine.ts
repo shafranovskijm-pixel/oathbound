@@ -2,11 +2,13 @@ import { GameAudio } from "./audio";
 import { ASK, DROP, GREET, ITEM, KEY_RU, MOB, NPCS, ROLE, SHOP, type Guise, type ItemId, type MobKind, type Npc, type Slot } from "./content";
 import {
   HEROES,
+  ALDRIC_TALENT_PATHS,
   SPELLS,
   TALENTS,
   type HeroId,
   type SpellId,
   type TalentId,
+  type TalentPath,
 } from "./heroes";
 import { BUILDINGS, WAYPOINTS, type BuildId, type WpId } from "./keep";
 import { DATA_CRAFT as CRAFT, GATHER_NODES, LANDMARKS, LORE_FINDS, SITES, gatherNodeAt, loreFindAt, siteAt, type SiteId } from "./data";
@@ -48,13 +50,15 @@ export type Snapshot = {
   party: string[];
   quests: { text: string; done: boolean }[];
   spells: { id: SpellId; name: string; key: string; cost: number; ready: number }[];
-  talents: { id: TalentId; name: string; desc: string }[] | null;
+  talents: { id: TalentId; name: string; desc: string; path?: TalentPath; tier?: 1 | 2; icon?: 0 | 1 | 2 | 3; requires?: string }[] | null;
+  skills: { id: TalentId; name: string; path?: TalentPath; tier?: 1 | 2; icon?: 0 | 1 | 2 | 3 }[];
   hero: HeroId | null;
   muted: boolean;
   place: string;
   xpNeed: number;
   meleeCd: number;
   dodgeCd: number;
+  combat: { combo: number; window: number; riposte: boolean; label: string } | null;
   transport: { id: SavedTransport; name: string; speed: number; action: string };
   buildings: {
     id: BuildId;
@@ -336,6 +340,7 @@ type MagicFx = {
 };
 type Coin = { map: MapId; x: number; y: number; z: number; vx: number; vy: number; vz: number; n: number; wait: number; spin: number };
 type GroundItem = { id: number; map: MapId; x: number; y: number; z: number; vz: number; wait: number; item: ItemId };
+type HeroAction = "idle" | "attack" | "smite" | "guard" | "cleave" | "dodge" | "level";
 
 function loadImg(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -402,6 +407,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   let shieldT = 0;
   let markT = 0;
   let gearFxT = 0;
+  let comboStep = -1;
+  let comboT = 0;
+  let riposteT = 0;
+  let heroAction: HeroAction = "idle";
+  let heroActionT = 0;
+  let heroActionMax = 0;
+  let levelFxT = 0;
+  let skillFlashFrame = -1;
+  let skillFlashT = 0;
   let iframe = 0;
   let transport: SavedTransport = "foot";
   let transportAngle = 0;
@@ -574,7 +588,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
 
   const imgs: Record<string, HTMLImageElement> = {};
   void Promise.all(
-    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "shoal-settlement-v1", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
+    [...new Set([...Object.values(TILE_FILE), "hero-aldric", "hero-vessa", "hero-kael", "hero-aldric-action-v2", "hero-aldric-shore-action-v2", "aldric-skills-v2", "hero-aldric-appearances", "hero-vessa-appearances", "hero-kael-appearances", "hero-aldric-prologue", "hero-vessa-prologue", "hero-kael-prologue", "prologue-world", "island-life-v2", "sea-combat-v2", "shoal-settlement-v1", "npcs", "mobs", "crab", "props", "items", "keep", "coin", "wreck", "shack", "beacon", "cave", "site-foundations", "site-buildings-a", "site-buildings-b", "site-buildings-c", "waystones"])].map(
       async (n) => {
         imgs[n] = await loadImg(`/sprites/${n}.png`);
       },
@@ -1185,13 +1199,32 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         const s = SPELLS[id];
         return { id, name: s.name, key: s.key, cost: Math.max(1, s.cost + (id === "bolt" ? mods.boltCost : 0)), ready: cds[id] ?? 0 };
       }),
-      talents: mode === "talent" ? pending.map((id) => ({ id, name: TALENTS[id].name, desc: TALENTS[id].desc })) : null,
+      talents: mode === "talent"
+        ? pending.map((id) => ({
+            id,
+            name: TALENTS[id].name,
+            desc: TALENTS[id].desc,
+            path: TALENTS[id].path,
+            tier: TALENTS[id].tier,
+            icon: TALENTS[id].icon,
+            requires: TALENTS[id].requires ? TALENTS[TALENTS[id].requires!].name : undefined,
+          }))
+        : null,
+      skills: [...owned].map((id) => ({ id, name: TALENTS[id].name, path: TALENTS[id].path, tier: TALENTS[id].tier, icon: TALENTS[id].icon })),
       hero: mode === "menu" ? null : heroId,
       muted: audio.muted,
       place: PLACE[map],
       xpNeed: level * 36,
       meleeCd,
       dodgeCd,
+      combat: heroId === "aldric" && mode !== "menu"
+        ? {
+            combo: comboT > 0 ? comboStep + 1 : 0,
+            window: comboT,
+            riposte: riposteT > 0,
+            label: riposteT > 0 ? "Ответный удар готов" : comboT > 0 ? ["Первый звон", "Щитовой шаг", "Третий звон"][comboStep] : "Клинок готов",
+          }
+        : null,
       transport: transportInfo(),
       buildings: BUILDINGS.filter((b) => b.map === map).map((b) => {
         const currentLevel = buildingLevel(b.id);
@@ -1625,6 +1658,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   function addSlash(x: number, y: number, ang: number, r: number, color: string, style: Slash["style"] = "arc", life = 0.2) {
     slashes.push({ x, y, ang, r, color, style, t: life, max: life });
   }
+  function startHeroAction(action: HeroAction, duration: number) {
+    heroAction = action;
+    heroActionT = duration;
+    heroActionMax = duration;
+  }
   function float(x: number, y: number, text: string, color: string) {
     floaters.push({ x, y, text, life: 0.75, color });
   }
@@ -1692,6 +1730,15 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     transportAngle = 0;
     dodgeCd = 0;
     dodgeT = 0;
+    comboStep = -1;
+    comboT = 0;
+    riposteT = 0;
+    heroAction = "idle";
+    heroActionT = 0;
+    heroActionMax = 0;
+    levelFxT = 0;
+    skillFlashFrame = -1;
+    skillFlashT = 0;
     maxHp = h.hp;
     hp = h.hp;
     maxMp = h.mp;
@@ -2085,14 +2132,20 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function offerTalents() {
-    const pool = (Object.keys(TALENTS) as TalentId[]).filter((id) => TALENTS[id].hero === heroId && !owned.has(id));
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const t = pool[i];
-      pool[i] = pool[j];
-      pool[j] = t;
+    if (heroId === "aldric") {
+      pending = Object.values(ALDRIC_TALENT_PATHS)
+        .map((path) => path.find((id) => !owned.has(id) && (!TALENTS[id].requires || owned.has(TALENTS[id].requires!))))
+        .filter((id): id is TalentId => Boolean(id));
+    } else {
+      const pool = (Object.keys(TALENTS) as TalentId[]).filter((id) => TALENTS[id].hero === heroId && !owned.has(id));
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const t = pool[i];
+        pool[i] = pool[j];
+        pool[j] = t;
+      }
+      pending = pool.slice(0, 3);
     }
-    pending = pool.slice(0, 3);
     if (pending.length) {
       mode = "talent";
       emit(true);
@@ -2190,7 +2243,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       mp = maxMp;
       str += 1;
       say(`Уровень ${level}. Выбери талант.`);
-      burst(px, py, "#e8d48a", 22);
+      levelFxT = 2.2;
+      startHeroAction("level", 1.1);
+      addMagic("sigil", px, py, "#f0d58a", 42, 1.25);
+      addMagic("wave", px, py, "#9ec4e8", 58, 1.1);
+      burst(px, py, "#e8d48a", 34);
       float(px, py - 24, `Ур. ${level}`, "#e8d48a");
       audio.ok();
       offerTalents();
@@ -2268,7 +2325,18 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
   }
 
   function hurtPlayer(d: number) {
-    if (iframe > 0) return;
+    if (iframe > 0) {
+      if (dodgeT > 0 && riposteT <= 0 && heroId === "aldric") {
+        riposteT = 2.4;
+        mp = Math.min(maxMp, mp + 1);
+        addMagic("wave", px, py, "#d8f0ff", 31, 0.42);
+        addMagic("sigil", px, py, "#f0d58a", 22, 0.5, aim());
+        float(px, py - 25, "ИДЕАЛЬНЫЙ УВОРОТ", "#f0d58a");
+        say("Клинок вспыхнул: следующий удар станет ответным.");
+        audio.ok();
+      }
+      return;
+    }
     if (shieldT > 0) d = Math.max(1, Math.floor(d * 0.35));
     d = Math.max(1, d - armor());
     hp -= d;
@@ -2327,7 +2395,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     });
   }
 
-  function slashAt(x: number, y: number, ang: number, r: number, dmg: number, color: string, whirl = false) {
+  function slashAt(x: number, y: number, ang: number, r: number, dmg: number, color: string, whirl = false, bonusStun = 0) {
     addSlash(x, y, ang, r, color, whirl ? "ring" : "arc", whirl ? 0.28 : 0.2);
     lunge = 0.12;
     shake = 0.1;
@@ -2343,7 +2411,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
         if (dot < 0.15) continue;
       }
       hurtMob(m, dmg, 22, ang, color);
-      if (mods.stun) m.stun = Math.max(m.stun, 0.35 + mods.stun);
+      if (mods.stun || bonusStun) m.stun = Math.max(m.stun, 0.35 + mods.stun + bonusStun);
     }
   }
 
@@ -2377,10 +2445,40 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       audio.cannon();
       return;
     }
-    meleeCd = heroId === "vessa" ? 0.42 : heroId === "kael" ? 0.32 : 0.38;
     const ang = aim();
-    const r = (worn.wep === "harpoon" ? 62 : heroId === "aldric" ? 46 : 34) * mods.slash;
-    slashAt(px, py, ang, r, meleeDmg(), heroId === "aldric" ? "#e8e4d8" : "#c8d0c4", !!mods.whirl);
+    if (heroId !== "aldric") {
+      meleeCd = heroId === "vessa" ? 0.42 : 0.32;
+      const r = (worn.wep === "harpoon" ? 62 : 34) * mods.slash;
+      slashAt(px, py, ang, r, meleeDmg(), "#c8d0c4", !!mods.whirl);
+      return;
+    }
+    comboStep = comboT > 0 ? (comboStep + 1) % 3 : 0;
+    comboT = owned.has("wide") ? 1.35 : 1.02;
+    const finisher = comboStep === 2;
+    const reply = riposteT > 0;
+    const multiplier = reply ? 1.8 : comboStep === 0 ? 1 : comboStep === 1 ? 1.15 : 1.45;
+    const damage = Math.round(meleeDmg() * multiplier);
+    const radius = (worn.wep === "harpoon" ? 66 : comboStep === 0 ? 48 : comboStep === 1 ? 52 : 60) * mods.slash;
+    const color = reply ? "#fff0a8" : comboStep === 1 ? "#a8d9f0" : finisher ? "#f0cc78" : "#e8e4d8";
+    meleeCd = finisher ? 0.54 : comboStep === 1 ? 0.38 : 0.32;
+    startHeroAction(finisher ? "cleave" : "attack", meleeCd + 0.08);
+    slashAt(px, py, ang, radius, damage, color, !!mods.whirl, reply ? 0.65 : 0);
+    if (comboStep === 1) addMagic("impact", px + Math.cos(ang) * 22, py + Math.sin(ang) * 22, "#9ec4e8", 24, 0.3, ang);
+    if (finisher) {
+      skillFlashFrame = 3;
+      skillFlashT = 0.58;
+      addSlash(px, py, ang + 0.22, radius * 0.88, "#9ec4e8", mods.whirl ? "ring" : "arc", 0.34);
+      addMagic("wave", px, py, "#f0d58a", radius * 0.62, 0.42, ang);
+      burst(px + Math.cos(ang) * 30, py + Math.sin(ang) * 30, "#f0d58a", 14);
+      shake = Math.max(shake, 0.2);
+    }
+    if (reply) {
+      riposteT = 0;
+      skillFlashFrame = 0;
+      skillFlashT = 0.68;
+      addMagic("sigil", px, py, "#fff0a8", 32, 0.55, ang);
+      float(px, py - 30, "ОТВЕТНЫЙ УДАР", "#fff0a8");
+    }
   }
 
   function dodge() {
@@ -2409,6 +2507,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       say("Резкий поворот. Таран прошёл мимо.");
       audio.sail();
     } else {
+      startHeroAction("dodge", 0.3);
       addMagic("afterimage", px, py, "#d8e8df", 24, 0.34, Math.atan2(dodgeDy, dodgeDx), dir);
     }
     emit(true);
@@ -2434,6 +2533,11 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     const fx = Math.cos(ang);
     const fy = Math.sin(ang);
     audio.spell();
+    if (heroId === "aldric") {
+      startHeroAction(id === "guard" ? "guard" : id === "cleave" ? "cleave" : "smite", id === "cleave" ? 0.62 : 0.48);
+      skillFlashFrame = id === "smite" ? 1 : id === "guard" ? 2 : id === "cleave" ? 3 : 0;
+      skillFlashT = id === "guard" ? 0.72 : 0.58;
+    }
     if (id === "bolt" || id === "shot" || id === "frost" || id === "smite") {
       const spd = id === "shot" ? 390 : id === "smite" ? 300 : id === "frost" ? 240 : 280;
       const dmg =
@@ -2483,8 +2587,10 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       burst(px, py, "#e07a4a", 18);
     } else if (id === "cleave") {
       slashAt(px, py, ang, 58 * mods.slash, meleeDmg() + 4, "#e8e4d8", true);
+      addSlash(px, py, ang + Math.PI * 0.55, 48 * mods.slash, "#9ec4e8", "ring", 0.42);
+      addMagic("sigil", px, py, "#d8e8ff", 34, 0.58, ang);
     } else if (id === "guard") {
-      shieldT = 2.4;
+      shieldT = owned.has("stamina") ? 3.2 : 2.4;
       addMagic("wave", px, py, "#b9d8ff", 34, 0.48);
       addMagic("rune", px, py, "#d8e8ff", 26, 0.55);
       burst(px, py, "#b9d8ff", 12);
@@ -3120,6 +3226,14 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     shieldT = Math.max(0, shieldT - dt);
     markT = Math.max(0, markT - dt);
     gearFxT = Math.max(0, gearFxT - dt);
+    comboT = Math.max(0, comboT - dt);
+    if (comboT <= 0) comboStep = -1;
+    riposteT = Math.max(0, riposteT - dt);
+    heroActionT = Math.max(0, heroActionT - dt);
+    if (heroActionT <= 0) heroAction = "idle";
+    levelFxT = Math.max(0, levelFxT - dt);
+    skillFlashT = Math.max(0, skillFlashT - dt);
+    if (skillFlashT <= 0) skillFlashFrame = -1;
     iframe = Math.max(0, iframe - dt);
     goldFlash = Math.max(0, goldFlash - dt * 1.8);
     if (map === "keep" && built.has("hearth")) {
@@ -3896,14 +4010,22 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     blit(img, dx, dy, s, s, col * (img.width / cols), row * (img.height / rows), img.width / cols, img.height / rows);
   }
 
-  function drawHeroSprite(face: number, dx: number, dy: number, size: number) {
+  function drawHeroSprite(face: number, dx: number, dy: number, size: number, frame = 0) {
     const current = appearance();
     const generatedFace = face === 1 ? 2 : face === 2 ? 1 : face;
+    if (current === "shore" && heroId === "aldric") {
+      sheetGrid(imgs["hero-aldric-shore-action-v2"], face * 4 + Math.max(0, Math.min(3, frame)), 4, 4, dx, dy, size);
+      return;
+    }
     if (current === "castaway" || current === "shore") {
       sheetGrid(imgs[`${HEROES[heroId].sheet}-prologue`], (current === "castaway" ? 0 : 1) * 4 + generatedFace, 4, 2, dx, dy, size);
       return;
     }
     if (current === "base") {
+      if (heroId === "aldric") {
+        sheetGrid(imgs["hero-aldric-action-v2"], face * 4 + Math.max(0, Math.min(3, frame)), 4, 4, dx, dy, size);
+        return;
+      }
       sheet(imgs[HEROES[heroId].sheet], face, dx, dy, size);
       return;
     }
@@ -4590,7 +4712,7 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       if (fx.kind === "afterimage") {
         ctx.globalAlpha = left * 0.28;
         ctx.filter = `sepia(0.4) saturate(0.7) drop-shadow(0 0 6px ${fx.color})`;
-        drawHeroSprite(fx.face, -22, -34, 46);
+        drawHeroSprite(fx.face, -22, -34, 46, 1);
       } else if (fx.kind === "wave") {
         const radius = fx.r * (0.28 + progress * 0.82);
         ctx.globalAlpha = left * 0.72;
@@ -5004,11 +5126,12 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
     }
 
     const moving = Math.hypot(vx, vy) > 8;
-    const heroSize = 46;
+    const animatedAldric = heroId === "aldric" && (appearance() === "base" || appearance() === "shore");
+    const heroSize = animatedAldric ? 58 : 46;
     const heroBob = moving ? Math.sin(time * 13) * 1.4 : Math.sin(time * 2.4) * 0.45;
-    const ps = wrld(px - heroSize / 2, py - 35 + heroBob);
+    const ps = wrld(px - heroSize / 2, py - heroSize * 0.76 + heroBob);
     const cx = ps.x + heroSize / 2;
-    const cy = ps.y + 27;
+    const cy = ps.y + heroSize * 0.59;
     const feet = wrld(px, py + 10);
     if (transport === "boat") {
       if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.48;
@@ -5024,6 +5147,37 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.fill();
       ctx.restore();
     } else {
+    if (levelFxT > 0) {
+      const left = Math.min(1, levelFxT / 2.2);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const beam = ctx.createLinearGradient(cx, ps.y - 90, cx, feet.y + 8);
+      beam.addColorStop(0, "rgba(255,239,165,0)");
+      beam.addColorStop(0.42, `rgba(240,213,138,${left * 0.24})`);
+      beam.addColorStop(1, "rgba(126,176,220,0)");
+      ctx.fillStyle = beam;
+      ctx.fillRect(cx - 30, ps.y - 90, 60, feet.y - ps.y + 98);
+      ctx.translate(feet.x, feet.y);
+      ctx.rotate(time * 0.9);
+      ctx.strokeStyle = `rgba(255,232,150,${left * 0.8})`;
+      ctx.shadowColor = "#f0d58a";
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 2;
+      for (let ring = 0; ring < 2; ring++) {
+        ctx.beginPath();
+        const radius = 21 + ring * 9 + (1 - left) * 12;
+        for (let point = 0; point < 8; point++) {
+          const a = (point / 8) * Math.PI * 2;
+          const x = Math.cos(a) * radius;
+          const y = Math.sin(a) * radius * 0.36;
+          if (point === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     ctx.save();
     ctx.fillStyle = "rgba(5,7,9,0.42)";
     ctx.beginPath();
@@ -5051,10 +5205,28 @@ export function mountGame(canvas: HTMLCanvasElement, onChange: (s: Snapshot) => 
       ctx.stroke();
       ctx.restore();
     }
+    if (skillFlashFrame >= 0 && skillFlashT > 0) {
+      const flashLife = Math.min(1, skillFlashT / 0.58);
+      const flashSize = 42 + (1 - flashLife) * 20;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = Math.min(0.82, flashLife * 1.35);
+      ctx.filter = "drop-shadow(0 0 10px rgba(240,213,138,.72))";
+      sheetGrid(imgs["aldric-skills-v2"], skillFlashFrame, 2, 2, cx - flashSize / 2, ps.y - flashSize * 0.42, flashSize);
+      ctx.restore();
+    }
     if (iframe > 0 && ((time * 16) | 0) % 2 === 0) ctx.globalAlpha = 0.45;
     ctx.save();
     ctx.filter = "drop-shadow(0 6px 4px rgba(0,0,0,.55))";
-    drawHeroSprite(dir, ps.x, ps.y, heroSize);
+    const actionProgress = heroActionMax > 0 ? 1 - heroActionT / heroActionMax : 1;
+    const heroFrame = heroAction === "attack" || heroAction === "smite" || heroAction === "cleave"
+      ? actionProgress < 0.42 ? 2 : 3
+      : heroAction === "dodge"
+        ? 1
+        : moving && Math.floor(time * 8) % 2 === 1
+          ? 1
+          : 0;
+    drawHeroSprite(dir, ps.x, ps.y, heroSize, heroFrame);
     ctx.restore();
     ctx.globalAlpha = 1;
     if (has("torch")) {
