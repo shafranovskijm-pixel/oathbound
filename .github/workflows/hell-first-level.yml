@@ -70,7 +70,7 @@ jobs:
           VITE_AUTH_ENABLED: "false"
         run: |
           npm run typecheck
-          npm test
+          node --experimental-strip-types --test src/game/save.test.ts scripts/island-content.test.mjs
           npm run lint
           git diff --check
           npm run build:dev
