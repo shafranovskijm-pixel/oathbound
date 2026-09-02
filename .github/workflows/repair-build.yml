@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   repair:
@@ -23,13 +23,28 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Regenerate lock and run checks
+      - name: Regenerate dependency lock
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Persist repaired lock
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is already clean"
+            exit 0
+          fi
+          git config user.name "oathbound-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Repair dependency lock for clean builds"
+          git push
+
+      - name: Run clean checks and build
         shell: bash
         run: |
           mkdir -p build-diagnostics
           set +e
 
-          node --input-type=module <<'NODE' > build-diagnostics/versions-before.txt
+          node --input-type=module <<'NODE' > build-diagnostics/versions.txt
           import lock from './package-lock.json' with { type: 'json' };
           const names = ['vite', 'react', 'react-dom', '@tanstack/react-start', '@tanstack/router-plugin', 'lru-cache'];
           for (const name of names) {
@@ -38,32 +53,19 @@ jobs:
           }
           NODE
 
-          npm install --package-lock-only --ignore-scripts --no-audit --no-fund > build-diagnostics/01-lock.log 2>&1
-          echo "lock=$?" >> build-diagnostics/status.txt
-          git diff --stat -- package-lock.json > build-diagnostics/lock-diff-stat.txt
-
-          node --input-type=module <<'NODE' > build-diagnostics/versions-after.txt
-          import lock from './package-lock.json' with { type: 'json' };
-          const names = ['vite', 'react', 'react-dom', '@tanstack/react-start', '@tanstack/router-plugin', 'lru-cache'];
-          for (const name of names) {
-            const entry = lock.packages?.[`node_modules/${name}`];
-            console.log(`${name}: ${entry?.version ?? 'missing'}`);
-          }
-          NODE
-
-          npm ci --no-audit --no-fund > build-diagnostics/02-ci.log 2>&1
+          npm ci --no-audit --no-fund > build-diagnostics/01-ci.log 2>&1
           echo "ci=$?" >> build-diagnostics/status.txt
 
-          npm run typecheck > build-diagnostics/03-typecheck.log 2>&1
+          npm run typecheck > build-diagnostics/02-typecheck.log 2>&1
           echo "typecheck=$?" >> build-diagnostics/status.txt
 
-          npm test > build-diagnostics/04-tests.log 2>&1
+          npm test > build-diagnostics/03-tests.log 2>&1
           echo "tests=$?" >> build-diagnostics/status.txt
 
-          npm run lint > build-diagnostics/05-lint.log 2>&1
+          npm run lint > build-diagnostics/04-lint.log 2>&1
           echo "lint=$?" >> build-diagnostics/status.txt
 
-          VITE_AUTH_ENABLED=false npm run build:dev > build-diagnostics/06-build.log 2>&1
+          VITE_AUTH_ENABLED=false npm run build:dev > build-diagnostics/05-build.log 2>&1
           echo "build=$?" >> build-diagnostics/status.txt
 
           find dist .output -maxdepth 4 -type f -printf '%p\t%s bytes\n' 2>/dev/null | sort > build-diagnostics/output-files.txt
